@@ -1,0 +1,45 @@
+--- Virtual Environment ---
+
+Ignore the entire virtual environment folder
+
+qml_env/
+
+--- Python Cache ---
+
+pycache/
+*.pyc
+*.pyo
+*.pyd
+
+--- Jupyter Notebook ---
+
+Ignore the checkpoint files
+
+.ipynb_checkpoints/
+
+--- IDE / Editor ---
+
+Ignore VS Code settings
+
+.vscode/
+
+Ignore PyCharm settings
+
+.idea/
+
+--- Data (CRITICAL) ---
+
+Ignore any data files.
+
+You should NOT commit your industrial dataset.
+
+*.csv
+*.xlsx
+*.parquet
+data/
+datasets/
+
+--- Operating System ---
+
+.DS_Store
+Thumbs.db
