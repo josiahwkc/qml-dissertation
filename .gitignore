@@ -31,8 +31,6 @@ Ignore PyCharm settings
 
 Ignore any data files.
 
-You should NOT commit your industrial dataset.
-
 *.csv
 *.xlsx
 *.parquet

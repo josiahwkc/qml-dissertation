@@ -106,6 +106,7 @@ rustworkx==0.17.1
 scikit-learn==1.7.2
 scipy==1.15.3
 scipy-openblas32==0.3.30.0.7
+seaborn==0.13.2
 Send2Trash==1.8.3
 setuptools==80.9.0
 six==1.17.0
