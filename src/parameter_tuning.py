@@ -10,7 +10,7 @@ from sklearn.datasets import load_digits # Use load_digits for a smaller version
 # OR use fetch_openml('mnist_784') for the full version (slower but standard)
 from sklearn.metrics import accuracy_score
 
-# 1. Load Data
+# Load Data
 print("Loading MNIST data...")
 # We'll use the smaller 8x8 'digits' dataset for speed in prototyping.
 # For the final dissertation, use fetch_openml('mnist_784')
@@ -18,15 +18,7 @@ digits = load_digits()
 X = digits.data
 y = digits.target
 
-# 2. Filter for Binary Classification (0 vs 1)
-# This makes it a binary problem, like breast cancer
-binary_mask = (y == 0) | (y == 1)
-X = X[binary_mask]
-y = y[binary_mask]
-
-print(f"Data shape after filtering: {X.shape}")
-
-# 3. Preprocessing
+# Preprocessing
 # Scale
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
@@ -41,7 +33,7 @@ X_train, X_test, y_train, y_test = train_test_split(
     X_reduced, y, test_size=0.2, random_state=42
 )
 
-# 4. Grid Search (Same as before)
+# Grid Search (Same as before)
 param_grid = {
     'C': [0.1, 1, 10, 100],
     'gamma': [0.001, 0.01, 0.1, 1]
@@ -55,7 +47,7 @@ grid_search.fit(X_train, y_train)
 print(f"Best Parameters: {grid_search.best_params_}")
 print(f"Test Accuracy: {grid_search.score(X_test, y_test) * 100:.2f}%")
 
-# 5. Visualize
+# Visualize
 scores = grid_search.cv_results_["mean_test_score"].reshape(
     len(param_grid['gamma']),
     len(param_grid['C'])
@@ -68,5 +60,5 @@ sns.heatmap(scores,
             yticklabels=param_grid['gamma']) 
 plt.xlabel('C Parameter')
 plt.ylabel('Gamma Parameter')
-plt.title("SVM Accuracy on Binary MNIST (0 vs 1)")
+plt.title("SVM Accuracy on Binary MNIST")
 plt.show()
