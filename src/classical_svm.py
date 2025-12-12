@@ -3,17 +3,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import datasets, svm, metrics
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
 # %%
 # 1. CONFIGURATION
 # The sizes of the training sets we want to test (The "Data Diet")
-TRAINING_SIZES = [50, 100, 300, 500, 1000] 
+TRAINING_SIZES = [50, 100, 300, 500, 1000]
 
 # How many times to repeat each size (to average out luck)
-N_TRIALS = 5 
+N_TRIALS = 5
+
 N_COMPONENTS = 16
 
 # %%
@@ -59,17 +60,31 @@ for size in TRAINING_SIZES:
             X_train_pool, y_train_pool, train_size=size, 
             random_state=seed, stratify=y_train_pool
         )
+        
+        #Step B: Grid Search for Optimal Hyperparameters
+        print("Starting Grid Search...")
+        param_grid = {
+            'C': [0.1, 1, 10, 100],
+            'gamma': [0.001, 0.01, 0.1, 1]
+        }
+        
+        grid_search = GridSearchCV(svm.SVC(), param_grid, cv=5, n_jobs=-1)
+        grid_search.fit(X_subset, y_subset)
+        print(f"Best Parameters: {grid_search.best_params_}")
 
-        # Step B: Train Classical SVM
+        best_C = grid_search.best_params_['C']
+        best_gamma = grid_search.best_params_['gamma']
+        
+        # Step C: Train Classical SVM using extracted hyperparameters
         # SVC with RBF kernel is a very strong classical baseline
-        clf = svm.SVC(kernel='rbf', gamma='scale', C=1.0)
+        clf = svm.SVC(kernel='rbf', gamma=best_gamma, C=best_C)
         clf.fit(X_subset, y_subset)
 
-        # Step C: Evaluate on the FIXED Test Set
+        # Step D: Evaluate on the FIXED Test Set
         score = clf.score(X_test_fixed, y_test_fixed)
         trial_accuracies.append(score)
 
-    # Step D: Average the results for this size
+    # Step E: Average the results for this size
     avg_acc = np.mean(trial_accuracies)
     std_dev = np.std(trial_accuracies)
     
