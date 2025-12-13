@@ -4,6 +4,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import datasets, svm, metrics
+from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -48,11 +49,14 @@ print("-" * 50)
 # %%
 # 3. THE EXPERIMENT LOOP
 mean_accuracies = []
-std_devs = []
+std_accuracies = []
+mean_f1s = []
+std_f1s = []
 mean_times = []
 
 for size in TRAINING_SIZES:
     trial_accuracies = []
+    trial_f1s = []
     trial_times = []
     
     print(f"Training on subset size: {size} ... ")
@@ -87,30 +91,42 @@ for size in TRAINING_SIZES:
         end_time = time.time()
 
         # Step D: Evaluate on the FIXED Test Set
-        duration = end_time - start_time
-        trial_times.append(duration)
+        trial_times.append(end_time - start_time)
         
-        score = clf.score(X_test_fixed, y_test_fixed)
+        y_pred = clf.predict(X_test_fixed)
+        
+        score = metrics.accuracy_score(y_test_fixed, y_pred)
         trial_accuracies.append(score)
+        
+        f1 = f1_score(y_test_fixed, y_pred, average='weighted')
+        trial_f1s.append(f1)
 
     # Step E: Average the results for this size
     avg_acc = np.mean(trial_accuracies)
     std_dev = np.std(trial_accuracies)
+    
+    avg_f1 = np.mean(trial_f1s)
+    std_f1 = np.std(trial_f1s)
+    
     avg_time = np.mean(trial_times)
     
     mean_accuracies.append(avg_acc)
-    std_devs.append(std_dev)
+    std_accuracies.append(std_dev)
+    
+    mean_f1s.append(avg_f1)
+    std_f1s.append(std_f1)
+    
     mean_times.append(avg_time)
     
-    print(f"Avg Acc: {avg_acc:.2%} | Avg Time: {avg_time:.4f}s")
+    print(f"Avg Acc: {mean_accuracies[-1]:.2%} | Avg F1: {mean_f1s[-1]:.2f} | Time: {mean_times[-1]:.4f}s")
 
 # %%
 # 4. VISUALIZATION
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
 # Plot 1: Accuracy
-ax1.errorbar(TRAINING_SIZES, mean_accuracies, yerr=std_devs, 
+ax1.errorbar(TRAINING_SIZES, mean_accuracies, yerr=std_accuracies, 
              fmt='-o', capsize=5, label='Classical SVM', color='blue')
 ax1.set_title('Test Set Accuracy')
 ax1.set_xlabel('Training Samples')
@@ -118,15 +134,25 @@ ax1.set_ylabel('Accuracy')
 ax1.grid(True)
 ax1.legend()
 
-# Plot 2: Training Time
-ax2.plot(TRAINING_SIZES, mean_times, '-o', label='Classical SVM', color='red')
-ax2.set_title('Training Time vs Data Size')
+# Plot 2: F1 Score (The new metric)
+ax2.errorbar(TRAINING_SIZES, mean_f1s, yerr=std_f1s, 
+             fmt='-s', capsize=5, label='Classical SVM', color='green')
+ax2.set_title('Test Set F1-Score (Weighted)')
 ax2.set_xlabel('Training Samples')
-ax2.set_ylabel('Time (Seconds)')
+ax2.set_ylabel('F1 Score')
+ax2.set_ylim(0, 1) # F1 is always between 0 and 1
 ax2.grid(True)
 ax2.legend()
 
-#plt.tight_layout()
+# Plot 3: Training Time
+ax3.plot(TRAINING_SIZES, mean_times, '-o', label='Classical SVM', color='red')
+ax3.set_title('Training Time vs Data Size')
+ax3.set_xlabel('Training Samples')
+ax3.set_ylabel('Time (Seconds)')
+ax3.grid(True)
+ax3.legend()
+
+plt.tight_layout()
 plt.show()
 
 # %%
@@ -174,5 +200,4 @@ plt.xlabel("Principal Component 1")
 plt.ylabel("Principal Component 2")
 plt.grid(True, alpha=0.3)
 plt.show()
-
 # %%
