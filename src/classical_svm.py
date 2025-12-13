@@ -1,5 +1,6 @@
 # %%
 # IMPORTS
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import datasets, svm, metrics
@@ -48,10 +49,13 @@ print("-" * 50)
 # 3. THE EXPERIMENT LOOP
 mean_accuracies = []
 std_devs = []
+mean_times = []
 
 for size in TRAINING_SIZES:
     trial_accuracies = []
-    print(f"Training on subset size: {size} ... ", end="")
+    trial_times = []
+    
+    print(f"Training on subset size: {size} ... ")
 
     for seed in range(N_TRIALS):
         # Step A: Sample a small subset from the Training Pool
@@ -62,7 +66,6 @@ for size in TRAINING_SIZES:
         )
         
         #Step B: Grid Search for Optimal Hyperparameters
-        print("Starting Grid Search...")
         param_grid = {
             'C': [0.1, 1, 10, 100],
             'gamma': [0.001, 0.01, 0.1, 1]
@@ -78,34 +81,54 @@ for size in TRAINING_SIZES:
         # Step C: Train Classical SVM using extracted hyperparameters
         # SVC with RBF kernel is a very strong classical baseline
         clf = svm.SVC(kernel='rbf', gamma=best_gamma, C=best_C)
+        
+        start_time = time.time()
         clf.fit(X_subset, y_subset)
+        end_time = time.time()
 
         # Step D: Evaluate on the FIXED Test Set
+        duration = end_time - start_time
+        trial_times.append(duration)
+        
         score = clf.score(X_test_fixed, y_test_fixed)
         trial_accuracies.append(score)
 
     # Step E: Average the results for this size
     avg_acc = np.mean(trial_accuracies)
     std_dev = np.std(trial_accuracies)
+    avg_time = np.mean(trial_times)
     
     mean_accuracies.append(avg_acc)
     std_devs.append(std_dev)
+    mean_times.append(avg_time)
     
-    print(f"Avg Accuracy: {avg_acc:.2%}")
+    print(f"Avg Acc: {avg_acc:.2%} | Avg Time: {avg_time:.4f}s")
 
 # %%
 # 4. VISUALIZATION
 
-plt.figure(figsize=(8, 5))
-plt.errorbar(TRAINING_SIZES, mean_accuracies, yerr=std_devs, 
-                fmt='-o', capsize=5, label='Classical SVM')
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
-plt.title('Classical SVM Performance vs. Data Availability')
-plt.xlabel('Number of Training Samples')
-plt.ylabel('Test Set Accuracy')
-plt.grid(True)
-plt.legend()
+# Plot 1: Accuracy
+ax1.errorbar(TRAINING_SIZES, mean_accuracies, yerr=std_devs, 
+             fmt='-o', capsize=5, label='Classical SVM', color='blue')
+ax1.set_title('Test Set Accuracy')
+ax1.set_xlabel('Training Samples')
+ax1.set_ylabel('Accuracy')
+ax1.grid(True)
+ax1.legend()
+
+# Plot 2: Training Time
+ax2.plot(TRAINING_SIZES, mean_times, '-o', label='Classical SVM', color='red')
+ax2.set_title('Training Time vs Data Size')
+ax2.set_xlabel('Training Samples')
+ax2.set_ylabel('Time (Seconds)')
+ax2.grid(True)
+ax2.legend()
+
+#plt.tight_layout()
 plt.show()
+
 # %%
 # 5. VISUALIZATION OF DECISION BOUNDARIES
 # Run this AFTER running Cell 2 (Data Prep).
@@ -151,3 +174,5 @@ plt.xlabel("Principal Component 1")
 plt.ylabel("Principal Component 2")
 plt.grid(True, alpha=0.3)
 plt.show()
+
+# %%
