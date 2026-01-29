@@ -5,10 +5,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn import datasets, svm, metrics
 from sklearn.metrics import f1_score
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
+
+from grid_search import GridSearch
 
 # %%
 # 1. CONFIGURATION
@@ -18,7 +20,7 @@ N_COMPONENTS = 16
 
 # %%
 # 2. DATA PREPARATION
-print("Loading digits dataset...")
+#print("Loading digits dataset...")
 digits = datasets.load_digits()
 X_raw = digits.data
 y = digits.target
@@ -28,6 +30,7 @@ X_train_pool, X_test_fixed_raw, y_train_pool, y_test_fixed = train_test_split(
     X_raw, y, test_size=0.2, random_state=42, stratify=y
 )
 
+print(f"Train Pool Size: {len(X_train_pool)} samples")
 print(f"Fixed Test Set Size: {len(X_test_fixed_raw)} samples")
 print("-" * 50)
 
@@ -38,13 +41,13 @@ std_accuracies = []
 mean_f1s = []
 std_f1s = []
 mean_times = []
-
+    
 for size in TRAINING_SIZES:
     trial_accuracies = []
     trial_f1s = []
     trial_times = []
     
-    print(f"Training on subset size: {size} ... ")
+    print(f"Training on subset size: {size}")
 
     for seed in range(N_TRIALS):
         # Sample a small subset from the Training Pool
@@ -64,21 +67,13 @@ for size in TRAINING_SIZES:
         X_subset_transformed = preprocessor.transform(X_subset_raw)
         X_test_transformed = preprocessor.transform(X_test_fixed_raw)
         
-        #Grid Search for Optimal Hyperparameters
-        param_grid = {
-            'C': [0.1, 1, 10, 100],
-            'gamma': [0.001, 0.01, 0.1, 1]
-        }
-        
-        grid_search = GridSearchCV(svm.SVC(), param_grid, cv=5, n_jobs=-1)
-        grid_search.fit(X_subset_transformed, y_subset)
-        print(f"Best Parameters: {grid_search.best_params_}")
-
-        best_C = grid_search.best_params_['C']
-        best_gamma = grid_search.best_params_['gamma']
+        # ====================================
+        # COMMENTED OUT HYPERPARAMETER TUNING
+        # ====================================
+        # best_C, best_gamma = GridSearch.run(X_subset_transformed, y_subset)
         
         # Train Classical SVM using extracted hyperparameters
-        clf = svm.SVC(kernel='rbf', gamma=best_gamma, C=best_C)
+        clf = svm.SVC(kernel='rbf')
         
         start_time = time.time()
         clf.fit(X_subset_transformed, y_subset)
