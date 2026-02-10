@@ -21,11 +21,10 @@ Attribution:
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn import datasets, svm
+from sklearn import datasets, svm, metrics
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
-from sklearn.metrics import accuracy_score, classification_report
 from sklearn.pipeline import Pipeline
 
 # Quantum Imports
@@ -63,8 +62,8 @@ class ExperimentRunner():
     def __init__(self):
         self.results = {
             'sizes': [],
-            'q_acc': [], 'q_time': [],
-            'c_acc': [], 'c_time': []
+            'q_acc': [], 'q_f1': [], 'q_time': [],
+            'c_acc': [], 'c_f1': [], 'c_time': []
         }
         
     def run_classical(self, X_train, X_test, y_train, y_test):
@@ -77,8 +76,11 @@ class ExperimentRunner():
         clf.fit(X_train, y_train)
         end_time = time.time()
         
-        score = clf.score(X_test, y_test)
-        return score, (end_time - start_time)
+        y_pred = clf.predict(X_test)
+        
+        score = metrics.accuracy_score(y_test, y_pred)
+        f1 = metrics.f1_score(y_test, y_pred)
+        return score, f1, (end_time - start_time)
     
     def run_quantum(self, X_train, X_test, y_train, y_test, num_dims):
         """
@@ -99,11 +101,13 @@ class ExperimentRunner():
             
         qsvm = svm.SVC(kernel='precomputed')
         qsvm.fit(matrix_train, y_train)
-        
         end = time.time()
         
-        score = qsvm.score(matrix_test, y_test)
-        return score, (end - start)
+        y_pred = qsvm.predict(matrix_test)
+        
+        score = metrics.accuracy_score(y_test, y_pred)
+        f1 = metrics.f1_score(y_test, y_pred)
+        return score, f1, (end - start)
 
 # %%
 # Main execution
@@ -116,68 +120,91 @@ NUM_DIMS = 4
 data_manager = DataManager(num_dims=NUM_DIMS)
 runner = ExperimentRunner()
 
-header = f"{'Size':<6} | {'Trial':<5} | {'C-Acc':<8} | {'C-Time':<9} | {'Q-Acc':<8} | {'Q-Time':<9}"
-print("-" * 70)
+# Table Header
+print("-" * 80)
+header = f"{'Size':<6} | {'Trial':<5} | {'C-Acc':<8} | {'C-F1':<8} | {'C-Time':<9} || {'Q-Acc':<8} | {'Q-F1':<8} | {'Q-Time':<9}"
 print(header)
-print("-" * 70)
+print("-" * 80)
 
-# EXPERIMENT LOOP
 for size in TRAINING_SIZES:
-    c_accs, c_times = [], []
-    q_accs, q_times = [], []
+    # Temporary lists for this size iteration
+    c_accs, c_f1s, c_times = [], [], []
+    q_accs, q_f1s, q_times = [], [], []
     
     for seed in range(NUM_TRIALS):
+        # Get Data
         X_tr, X_te, y_tr, y_te = data_manager.get_data_split(size, seed)
         
         # Run Classical
-        c_score, c_time = runner.run_classical(X_tr, X_te, y_tr, y_te)
+        c_score, c_f1, c_time = runner.run_classical(X_tr, X_te, y_tr, y_te)
         c_accs.append(c_score)
+        c_f1s.append(c_f1)
         c_times.append(c_time)
         
         # Run Quantum
-        q_score, q_time = runner.run_quantum(X_tr, X_te, y_tr, y_te, NUM_DIMS)
+        q_score, q_f1, q_time = runner.run_quantum(X_tr, X_te, y_tr, y_te, NUM_DIMS)
         q_accs.append(q_score)
+        q_f1s.append(q_f1)
         q_times.append(q_time)
         
         # Print Row
-        # Formats: 
-        #   .2%  -> Percentage with 2 decimals (e.g. 95.50%)
-        #   .4f  -> Float with 4 decimals (e.g. 0.0012)
-        row = f"{size:<6} | {seed+1:<5} | {c_score:<8.2%} | {c_time:<9.4f} | {q_score:<8.2%} | {q_time:<9.4f}"
+        row = (f"{size:<6} | {seed+1:<5} | "
+               f"{c_score:<8.2%} | {c_f1:<8.2f} | {c_time:<9.4f} || "
+               f"{q_score:<8.2%} | {q_f1:<8.2f} | {q_time:<9.4f}")
         print(row)
 
-    runner.results['sizes'].append(size)
-    runner.results['c_acc'].append(np.mean(c_accs))
-    runner.results['c_time'].append(np.mean(c_times))
-    runner.results['q_acc'].append(np.mean(q_accs))
-    runner.results['q_time'].append(np.mean(q_times))
+    avg_c_acc = np.mean(c_accs)
+    avg_c_f1 = np.mean(c_f1s)
+    avg_c_time = np.mean(c_times)
     
-    print("-" * 70)
+    avg_q_acc = np.mean(q_accs)
+    avg_q_f1 = np.mean(q_f1s)
+    avg_q_time = np.mean(q_times)
+
+    runner.results['sizes'].append(size)
+    runner.results['c_acc'].append(avg_c_acc)
+    runner.results['c_f1'].append(avg_c_f1)
+    runner.results['c_time'].append(avg_c_time)
+    
+    runner.results['q_acc'].append(avg_q_acc)
+    runner.results['q_f1'].append(avg_q_f1)
+    runner.results['q_time'].append(avg_q_time)
+    
+    # Print Summary Block
+    print("-" * 105)
+    print(f"SUMMARY FOR SIZE {size} (Average of {NUM_TRIALS} trials):")
+    print(f"Classical > Acc: {avg_c_acc:.2%} | F1: {avg_c_f1:.2f} | Time: {avg_c_time:.4f}s")
+    print(f"Quantum   > Acc: {avg_q_acc:.2%} | F1: {avg_q_f1:.2f} | Time: {avg_q_time:.4f}s")
+    print("-" * 105)
 
 # %%
 # VISUALIZATION
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
 # Accuracy
-ax1.plot(runner.results['sizes'], runner.results['c_acc'], 'o-', label='Classical (RBF)', color='blue')
-ax1.plot(runner.results['sizes'], runner.results['q_acc'], 's-', label='Quantum (ZZ)', color='purple')
-ax1.set_xlabel('Training Set Size')
-ax1.set_ylabel('Accuracy')
-ax1.set_title('Classification Accuracy')
+ax1.plot(runner.results['sizes'], runner.results['c_acc'], 'o-', label='Classical', color='blue')
+ax1.plot(runner.results['sizes'], runner.results['q_acc'], 's-', label='Quantum', color='purple')
+ax1.set_title('Accuracy')
+ax1.set_xlabel('Training Samples')
 ax1.legend()
 ax1.grid(True)
 
-# Time
-ax2.plot(runner.results['sizes'], runner.results['c_time'], 'o-', label='Classical', color='blue')
-ax2.plot(runner.results['sizes'], runner.results['q_time'], 's-', label='Quantum', color='purple')
-ax2.set_xlabel('Training Set Size')
-ax2.set_ylabel('Time (seconds)')
-ax2.set_title('Training Time (Log Scale)')
-ax2.set_yscale('log') 
+# F1 Score
+ax2.plot(runner.results['sizes'], runner.results['c_f1'], 'o-', label='Classical', color='blue')
+ax2.plot(runner.results['sizes'], runner.results['q_f1'], 's-', label='Quantum', color='purple')
+ax2.set_title('F1 Score (Weighted)')
+ax2.set_xlabel('Training Samples')
 ax2.legend()
 ax2.grid(True)
 
+# Time
+ax3.plot(runner.results['sizes'], runner.results['c_time'], 'o-', label='Classical', color='blue')
+ax3.plot(runner.results['sizes'], runner.results['q_time'], 's-', label='Quantum', color='purple')
+ax3.set_title('Training Time (Log Scale)')
+ax3.set_yscale('log')
+ax3.set_xlabel('Training Samples')
+ax3.legend()
+ax3.grid(True)
+
 plt.tight_layout()
 plt.show()
-
-# %%
