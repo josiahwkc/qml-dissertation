@@ -1,125 +1,94 @@
-# %%
-# IMPORTS
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn import datasets, metrics
-from sklearn.metrics import f1_score
+from sklearn import datasets, svm
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
+from sklearn.metrics import accuracy_score, classification_report
 from sklearn.pipeline import Pipeline
 
-# QUANTUM IMPORTS
+# Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
 from qiskit_machine_learning.kernels import FidelityQuantumKernel
-from qiskit_machine_learning.algorithms import QSVC
 
-# %%
-# 1. CONFIGURATION
-TRAINING_SIZES = [20, 50, 100] 
-N_TRIALS = 3  
-N_COMPONENTS = 4
+# CONFIGURATION
+N_DIM = 4 
+TRAIN_SIZE = 100
+TRAINING_SIZES = [20, 40, 60, 80, 100]
+N_TRIALS = 3
+TEST_SIZE = 20
+N_CLASS = 2
 
-# %%
-# 2. DATA PREPARATION
-digits = datasets.load_digits()
-X_all = digits.data
-y_all = digits.target
+digits = datasets.load_digits(n_class=N_CLASS)
 
-binary_mask = (y_all == 0) | (y_all == 1) | (y_all == 2)
-X_binary = X_all[binary_mask]
-y_binary = y_all[binary_mask]
-
-# Split raw data (Locked Test Set)
-X_train_pool, X_test_fixed_raw, y_train_pool, y_test_fixed = train_test_split(
-    X_binary, y_binary, test_size=0.2, random_state=42, stratify=y_binary
+X_train, X_test, y_train, y_test = train_test_split(
+    digits.data, digits.target, test_size=0.2, random_state=22
 )
 
-print(f"Fixed Test Set Size: {len(X_test_fixed_raw)} samples")
-print("-" * 50)
 
-# %%
-# 3. THE EXPERIMENT LOOP
-mean_accuracies = []
-std_accuracies = []
-mean_f1s = []
-std_f1s = []
-mean_times = []
+preprocessing_pipeline = Pipeline([
+    ('pca', PCA(n_components=N_DIM)),             
+    ('std_scaler', StandardScaler()),             
+    ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+])
 
-for size in TRAINING_SIZES:
-    trial_accuracies = []
-    trial_f1s = []
-    trial_times = []
-    
-    print(f"Training QSVC on subset size: {size}")
+X_train_processed = preprocessing_pipeline.fit_transform(X_train)
+X_test_processed = preprocessing_pipeline.transform(X_test)
 
-    for seed in range(N_TRIALS):
-        X_subset_raw, _, y_subset, _ = train_test_split(
-            X_train_pool, y_train_pool, train_size=size, 
-            random_state=seed, stratify=y_train_pool
-        )
-        
-        preprocessor = Pipeline([
-            ('scaler_std', StandardScaler()),
-            ('pca', PCA(n_components=N_COMPONENTS)),
-            ('scaler_minmax', MinMaxScaler(feature_range=(-1, 1)))
-        ])
-        
-        preprocessor.fit(X_subset_raw)
-        X_subset_transformed = preprocessor.transform(X_subset_raw)
-        X_test_transformed = preprocessor.transform(X_test_fixed_raw)
-        
-        feature_map = ZZFeatureMap(
-            feature_dimension=N_COMPONENTS, 
-            reps=2, 
-            entanglement='linear'
-        )
-        
-        kernel = FidelityQuantumKernel(feature_map=feature_map)
-        qsvc = QSVC(quantum_kernel=kernel)
-        
-        start_time = time.time()
-        qsvc.fit(X_subset_transformed, y_subset)
-        end_time = time.time()
-        
-        trial_times.append(end_time - start_time)
-        
-        y_pred = qsvc.predict(X_test_transformed)
-        
-        score = metrics.accuracy_score(y_test_fixed, y_pred)
-        trial_accuracies.append(score)
-        
-        f1 = f1_score(y_test_fixed, y_pred, average='weighted')
-        trial_f1s.append(f1)
-        
-        print(f"Trial {seed+1}/{N_TRIALS}: Acc={score:.2%} | Time={trial_times[-1]:.2f}s | F1={trial_f1s[-1]:.2f}")
+print(f"Original Feature Count: {X_train.shape[1]}")
+print(f"Processed Feature Count: {X_train_processed.shape[1]} (Should match N_DIM={N_DIM})")
 
-    # Average results
-    avg_acc = np.mean(trial_accuracies)
-    std_dev = np.std(trial_accuracies)
-    
-    avg_f1 = np.mean(trial_f1s)
-    std_f1 = np.std(trial_f1s)
-    
-    avg_time = np.mean(trial_times)
-    
-    mean_accuracies.append(avg_acc)
-    std_accuracies.append(std_dev)
-    
-    mean_f1s.append(avg_f1)
-    std_f1s.append(std_f1)
-    
-    mean_times.append(avg_time)
-    
-    print(f"Size {size} Avg Acc: {mean_accuracies[-1]:.2%} | Avg F1: {mean_f1s[-1]:.2f} | Time: {mean_times[-1]:.4f}s")
+# Limit dataset size for simulation speed
+# We slice AFTER processing to ensure the pipeline is fit on the full distribution
+X_train_processed = X_train_processed[:TRAIN_SIZE]
+y_train = y_train[:TRAIN_SIZE]
+X_test_processed = X_test_processed[:TEST_SIZE]
+y_test = y_test[:TEST_SIZE]
 
-# %%
-# 4. PLOTTING (Simple comparison)
-plt.errorbar(TRAINING_SIZES, mean_accuracies, yerr=std_accuracies, fmt='-o', label='QSVC')
-plt.xlabel('Training Size')
-plt.ylabel('Accuracy')
-plt.title('Quantum SVM Performance (Simulated)')
-plt.legend()
-plt.grid(True)
+print(f"Final Dataset: {len(X_train_processed)} training samples, {N_DIM} features.")
+
+# DEFINE QUANTUM KERNEL
+feature_map = ZZFeatureMap(feature_dimension=N_DIM, reps=2, entanglement='linear')
+kernel = FidelityQuantumKernel(feature_map=feature_map)
+
+# PRECOMPUTE KERNEL MATRICES
+print("Calculating Training Kernel Matrix (Simulating Quantum Circuit)...")
+start_q_time = time.time()
+
+try:
+    matrix_train = kernel.evaluate(x_vec=X_train_processed)
+    matrix_test = kernel.evaluate(x_vec=X_test_processed, y_vec=X_train_processed)
+except ValueError as e:
+    print(f"\nCRITICAL ERROR: {e}")
+    print("This usually means N_DIM is too high or PCA failed.")
+    exit()
+
+end_q_time = time.time()
+quantum_time = end_q_time - start_q_time
+print(f"Quantum Kernel Calculation Time: {quantum_time:.2f} seconds")
+
+# VISUALIZE KERNEL MATRIX
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.imshow(matrix_train, interpolation='nearest', origin='upper', cmap='Blues')
+plt.title("Training Kernel Matrix")
+plt.subplot(1, 2, 2)
+plt.imshow(matrix_test, interpolation='nearest', origin='upper', cmap='Reds')
+plt.title("Testing Kernel Matrix")
 plt.show()
+
+# TRAIN SVM
+print("Training Classical SVM on Quantum Kernel...")
+start_c_time = time.time()
+
+qsvm = svm.SVC(kernel='precomputed', C=1.0)
+qsvm.fit(matrix_train, y_train)
+
+end_c_time = time.time()
+classical_time = end_c_time - start_c_time
+print(f"SVM Training Time: {classical_time:.4f} seconds")
+
+# EVALUATE
+score = qsvm.score(matrix_test, y_test)
+print(f"\nFinal Test Accuracy: {score:.2%}")
