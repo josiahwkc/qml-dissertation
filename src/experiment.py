@@ -21,64 +21,13 @@ Attribution:
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn import datasets, svm, metrics
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.decomposition import PCA
-from sklearn.pipeline import Pipeline
+from sklearn import svm, metrics
+
+from data_manager import DataManager, AdhocDataManager
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
 from qiskit_machine_learning.kernels import FidelityQuantumKernel
-
-# %%
-# Data Manager Class
-class DataManager():
-    def __init__(self, num_dims=4, n_class=2):
-        self.num_dims = num_dims
-        digits = datasets.load_digits(n_class=n_class)
-        self.X = digits.data
-        self.y = digits.target
-        
-    def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        """
-        imbalance_ratio: proportion of class 0 in training set
-        0.5 = balanced, 0.9 = 90% class 0, 10% class 1
-        """
-        # Separate classes
-        X_class0 = self.X[self.y == 0]
-        X_class1 = self.X[self.y == 1]
-        
-        # Calculate how many of each class to sample
-        n_class0 = int(train_size * imbalance_ratio)
-        n_class1 = train_size - n_class0
-        
-        rng = np.random.default_rng(seed)
-        idx0 = rng.choice(len(X_class0), size=n_class0, replace=False)
-        idx1 = rng.choice(len(X_class1), size=n_class1, replace=False)
-        
-        X_train = np.vstack([X_class0[idx0], X_class1[idx1]])
-        y_train = np.array([0] * n_class0 + [1] * n_class1)
-        
-        # Shuffle
-        shuffle_idx = rng.permutation(len(y_train))
-        X_train = X_train[shuffle_idx]
-        y_train = y_train[shuffle_idx]
-        
-        _, X_test, _, y_test = train_test_split(
-            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
-        )
-        
-        preprocessing_pipeline = Pipeline([
-                ('pca', PCA(n_components=self.num_dims)),
-                ('std_scaler', StandardScaler()),
-                ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
-            ])
-
-        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
-        X_test_processed = preprocessing_pipeline.transform(X_test)
-        
-        return X_train_processed, X_test_processed, y_train, y_test
 
 # %%
 # Experiment Class
@@ -304,12 +253,15 @@ class ExperimentRunner():
 # CONFIGURATION AND EXECUTION
 
 # Choose experiment mode: 'size' or 'imbalance'
-EXPERIMENT_MODE = 'imbalance'
+EXPERIMENT_MODE = 'size'
 
 NUM_DIMS = 4
 NUM_TRIALS = 3
 
+# Choose data manager/dataset to use
+adhoc_data_manager = AdhocDataManager()
 data_manager = DataManager(num_dims=NUM_DIMS)
+
 runner = ExperimentRunner()
 
 if EXPERIMENT_MODE == 'size':
@@ -317,7 +269,7 @@ if EXPERIMENT_MODE == 'size':
     TRAINING_SIZES = [20, 40, 60, 80, 100]
     runner.run_experiment(
         mode='size',
-        data_manager=data_manager,
+        data_manager=adhoc_data_manager,
         num_dims=NUM_DIMS,
         num_trials=NUM_TRIALS,
         training_sizes=TRAINING_SIZES
@@ -329,7 +281,7 @@ elif EXPERIMENT_MODE == 'imbalance':
     FIXED_SIZE = 100
     runner.run_experiment(
         mode='imbalance',
-        data_manager=data_manager,
+        data_manager=adhoc_data_manager,
         num_dims=NUM_DIMS,
         num_trials=NUM_TRIALS,
         imbalance_ratios=IMBALANCE_RATIOS,
