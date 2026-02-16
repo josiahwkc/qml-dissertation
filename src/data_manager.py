@@ -31,44 +31,55 @@ from qiskit_machine_learning.datasets import ad_hoc_data
 
 class BaseDataSplitter():
     """Handles train/test splitting logic - shared utility"""
+        
     @staticmethod
-    def create_imbalanced_split(X, y, train_size, seed, imbalance_ratio=0.5):
-        """
-        Create train/test split with class imbalance in training set
-        
-        Args:
-            X: Full feature matrix
-            y: Full label vector
-            train_size: Number of samples in training set
-            seed: Random seed for reproducibility
-            imbalance_ratio: Proportion of class 0 in training set (0.5 = balanced)
-        
-        Returns:
-            X_train, X_test, y_train, y_test (test set is always balanced)
-        """
-        X_pool, X_test, y_pool, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-        
-        X_pool_class0 = X_pool[y_pool == 0]
-        X_pool_class1 = X_pool[y_pool == 1]
-        
-        n_class0 = int(train_size * imbalance_ratio)
-        n_class1 = train_size - n_class0
-        
+    def create_class_imbalance(X_pool, y_pool, train_size, seed, imbalance_ratio=0.5):
+        num_classes = len(np.unique(y_pool))
         rng = np.random.default_rng(seed)
-        idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
-        idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
         
-        X_train = np.vstack([X_pool_class0[idx0], X_pool_class1[idx1]])
-        y_train = np.array([0] * len(idx0) + [1] * len(idx1))
+        if num_classes == 2:
+            # Binary classification - apply imbalance
+            X_pool_class0 = X_pool[y_pool == 0]
+            X_pool_class1 = X_pool[y_pool == 1]
+            
+            n_class0 = int(train_size * imbalance_ratio)
+            n_class1 = train_size - n_class0
+            
+            idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
+            idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
+            
+            X_train = np.vstack([X_pool_class0[idx0], X_pool_class1[idx1]])
+            y_train = np.array([0] * len(idx0) + [1] * len(idx1))
+            
+        else:
+            # Multi-class - balanced sampling across all classes            
+            samples_per_class = train_size // num_classes
+            remainder = train_size % num_classes
+            
+            X_train_list = []
+            y_train_list = []
+            
+            for class_label in range(num_classes):
+                X_class = X_pool[y_pool == class_label]
+                
+                # Distribute remainder across first few classes
+                n_samples = samples_per_class + (1 if class_label < remainder else 0)
+                n_samples = min(n_samples, len(X_class))
+                
+                idx = rng.choice(len(X_class), size=n_samples, replace=False)
+                X_train_list.append(X_class[idx])
+                y_train_list.append(np.full(len(idx), class_label))
+            
+            X_train = np.vstack(X_train_list)
+            y_train = np.concatenate(y_train_list)
         
+        # Shuffle
         shuffle_idx = rng.permutation(len(y_train))
         X_train = X_train[shuffle_idx]
         y_train = y_train[shuffle_idx]
         
-        return X_train, X_test, y_train, y_test
-
+        return X_train, y_train
+    
 
 class MNISTDataManager():
     """Manages real MNIST digit data"""
@@ -79,14 +90,13 @@ class MNISTDataManager():
         self.y = digits.target
         
     def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        X_train, X_test, y_train, y_test = BaseDataSplitter.create_imbalanced_split(
-            self.X, self.y, train_size, seed, imbalance_ratio
+        X_pool, X_test, y_pool, y_test = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
         )
         
-        train_indices = set([tuple(x) for x in X_train])
-        test_indices = set([tuple(x) for x in X_test])
-        overlap = train_indices & test_indices
-        print(f"Samples in both train and test: {len(overlap)}")  # Should be 0
+        X_train, y_train = BaseDataSplitter.create_class_imbalance(
+            X_pool, y_pool, train_size, seed, imbalance_ratio
+        )
         
         preprocessing_pipeline = Pipeline([
             ('pca', PCA(n_components=self.num_dims)),
@@ -103,9 +113,7 @@ class AdhocDataManager():
     """Generates synthetic data using Qiskit's ad_hoc_data"""
     def __init__(self, num_dims=2, gap=0.3):
         self.num_dims = num_dims
-        
-        print(f"Generating Qiskit Ad Hoc Data (Dims={num_dims}, Gap={gap})...")
-        
+                
         # Generate fixed pools
         X_train_pool, y_train_pool, X_test_fixed, y_test_fixed = ad_hoc_data(
             training_size=600, 
@@ -119,31 +127,12 @@ class AdhocDataManager():
         self.X_pool = X_train_pool
         self.y_pool = np.argmax(y_train_pool, axis=1)
         
-        self.X_test_fixed = X_test_fixed  # Never changes
+        self.X_test_fixed = X_test_fixed
         self.y_test_fixed = np.argmax(y_test_fixed, axis=1)
         
     def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        """Sample from training pool, always use fixed test set"""
-        # Separate classes in training pool
-        X_pool_class0 = self.X_pool[self.y_pool == 0]
-        X_pool_class1 = self.X_pool[self.y_pool == 1]
+        X_train, y_train = BaseDataSplitter.create_class_imbalance(
+            self.X_pool, self.y_pool, train_size, seed, imbalance_ratio
+        )
         
-        # Calculate samples per class
-        n_class0 = int(train_size * imbalance_ratio)
-        n_class1 = train_size - n_class0
-        
-        # Sample from pools
-        rng = np.random.default_rng(seed)
-        idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
-        idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
-        
-        X_train = np.vstack([X_pool_class0[idx0], X_pool_class1[idx1]])
-        y_train = np.array([0] * len(idx0) + [1] * len(idx1))
-        
-        # Shuffle
-        shuffle_idx = rng.permutation(len(y_train))
-        X_train = X_train[shuffle_idx]
-        y_train = y_train[shuffle_idx]
-        
-        # Return with FIXED test set
         return X_train, self.X_test_fixed, y_train, self.y_test_fixed
