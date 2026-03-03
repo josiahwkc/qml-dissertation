@@ -115,15 +115,16 @@ class AdhocDataManager():
 class CSVDataManager():
     """Manages arbitrary CSV datasets with automatic preprocessing"""
     def __init__(self, filename, target_col, num_dims=4, n_class=None, 
-                 categorical_cols=None, drop_cols=None):
+                 categorical_cols=None, drop_cols=None, max_samples=1000):
         """
         Args:
             filename: CSV filename in the datasets/ folder
             target_col: Name of the target column to predict
             num_dims: Number of PCA components for dimensionality reduction
             n_class: Number of classes to keep (None = keep all)
-            categorical_cols: List of categorical column names to encode (None = auto-detect)
-            drop_cols: List of columns to drop before processing (e.g., IDs, timestamps)
+            categorical_cols: List of categorical column names to encode
+            drop_cols: List of columns to drop before processing
+            max_samples: Maximum total samples to use (for large datasets like MNIST)
         """
         self.num_dims = num_dims
         self.target_col = target_col
@@ -140,7 +141,7 @@ class CSVDataManager():
         df = pd.read_csv(file_path)
         print(f"Original shape: {df.shape}")
         
-        # Drop specified columns (e.g., IDs, metadata)
+        # Drop specified columns
         if drop_cols:
             df = df.drop(columns=drop_cols, errors='ignore')
             print(f"After dropping columns: {df.shape}")
@@ -154,7 +155,6 @@ class CSVDataManager():
         
         # Handle categorical features
         if categorical_cols is None:
-            # Auto-detect: any object/string columns
             categorical_cols = X_df.select_dtypes(include=['object', 'category']).columns.tolist()
         
         if categorical_cols:
@@ -172,7 +172,7 @@ class CSVDataManager():
         # Convert to numpy
         X_raw = X_df.values
         
-        # Encode target labels to 0, 1, 2, ... (in case they're strings or non-sequential)
+        # Encode target labels
         le_target = LabelEncoder()
         y_encoded = le_target.fit_transform(y_raw)
         self.target_classes = le_target.classes_
@@ -185,20 +185,33 @@ class CSVDataManager():
                 print(f"Warning: Requested {n_class} classes but only {len(unique_classes)} available")
                 n_class = len(unique_classes)
             
-            # Keep first n_class classes
             mask = y_encoded < n_class
-            self.X = X_raw[mask]
-            self.y = y_encoded[mask]
-            print(f"Filtered to {n_class} classes: {len(self.y)} samples")
+            X_filtered = X_raw[mask]
+            y_filtered = y_encoded[mask]
+            print(f"Filtered to {n_class} classes: {len(y_filtered)} samples")
         else:
-            self.X = X_raw
-            self.y = y_encoded
-            print(f"Using all {len(np.unique(self.y))} classes: {len(self.y)} samples")
+            X_filtered = X_raw
+            y_filtered = y_encoded
+            print(f"Using all {len(np.unique(y_filtered))} classes: {len(y_filtered)} samples")
+        
+        if len(y_filtered) > max_samples:
+            # Stratified sampling to keep class balance
+            X_sampled, _, y_sampled, _  = train_test_split(
+                X_filtered, y_filtered,
+                train_size=max_samples,
+                random_state=42,
+                stratify=y_filtered
+            )
+            self.X = X_sampled
+            self.y = y_sampled
+            print(f"Subsampled to {len(self.y)} samples (stratified)")
+        else:
+            self.X = X_filtered
+            self.y = y_filtered
         
         # Verify we have enough features for PCA
         if self.X.shape[1] < num_dims:
-            print(f"Warning: Only {self.X.shape[1]} features available, but num_dims={num_dims}")
-            print(f"Reducing num_dims to {self.X.shape[1]}")
+            print(f"Warning: Only {self.X.shape[1]} features available, reducing num_dims to {self.X.shape[1]}")
             self.num_dims = self.X.shape[1]
 
     def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
