@@ -2,7 +2,7 @@
 Quantum vs. Classical SVM Benchmark Experiment
 ==============================================
 Author: Josiah Chan (K23091949)
-Date: February 2026
+
 Description: 
   This script benchmarks the performance and training time of a Quantum Support 
   Vector Machine (QSVC) against a Classical SVM (RBF Kernel).
@@ -19,11 +19,13 @@ Attribution:
 # %%
 # Imports
 import time
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import stats
 from sklearn import svm, metrics
 
-from data_manager import DataManager, AdhocDataManager
+from data_manager import CSVDataManager, AdhocDataManager
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
@@ -37,7 +39,8 @@ class ExperimentRunner():
             'x_values': [],
             'sizes': [],
             'q_acc': [], 'q_acc_std': [],  'q_f1': [], 'q_f1_std': [], 'q_time': [],
-            'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': []
+            'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
+            'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
         }
         
     def run_classical(self, X_train, X_test, y_train, y_test):
@@ -53,7 +56,7 @@ class ExperimentRunner():
         y_pred = clf.predict(X_test)
         
         score = metrics.accuracy_score(y_test, y_pred)
-        f1 = metrics.f1_score(y_test, y_pred)
+        f1 = metrics.f1_score(y_test, y_pred, average='weighted')
         
         return score, f1, (end_time - start_time)
     
@@ -81,7 +84,7 @@ class ExperimentRunner():
         y_pred = qsvm.predict(matrix_test)
         
         score = metrics.accuracy_score(y_test, y_pred)
-        f1 = metrics.f1_score(y_test, y_pred)
+        f1 = metrics.f1_score(y_test, y_pred, average='weighted')
         
         return score, f1, (end - start)
     
@@ -105,7 +108,7 @@ class ExperimentRunner():
             experiment_values = training_sizes
             x_label = 'Training Samples'
             title_suffix = 'vs Training Size'
-            value_name = 'Size'
+            value_name = 'Training Size'
         elif mode == 'imbalance':
             if imbalance_ratios is None:
                 raise ValueError("imbalance_ratios must be provided when mode='imbalance'")
@@ -150,17 +153,29 @@ class ExperimentRunner():
                 q_data['time'].append(q_time)
             
             # Calculate statistics
-            q_avg_acc = np.mean(q_data['acc'])
-            q_std_acc = np.std(q_data['acc'])
-            q_avg_f1 = np.mean(q_data['f1'])
-            q_std_f1 = np.std(q_data['f1'])
+            q_avg_acc, q_std_acc = np.mean(q_data['acc']), np.std(q_data['acc'])
+            q_avg_f1, q_std_f1 = np.mean(q_data['f1']), np.std(q_data['f1'])
             q_avg_time = np.mean(q_data['time'])
             
-            c_avg_acc = np.mean(c_data['acc'])
-            c_std_acc = np.std(c_data['acc'])
-            c_avg_f1 = np.mean(c_data['f1'])
-            c_std_f1 = np.std(c_data['f1'])
+            c_avg_acc, c_std_acc = np.mean(c_data['acc']), np.std(c_data['acc'])
+            c_avg_f1, c_std_f1 = np.mean(c_data['f1']), np.std(c_data['f1'])
             c_avg_time = np.mean(c_data['time'])
+            
+            # Calculate Deltas (Quantum - Classical)
+            delta_acc = q_avg_acc - c_avg_acc
+            delta_f1 = q_avg_f1 - c_avg_f1
+            time_ratio = q_avg_time / c_avg_time if c_avg_time > 0 else q_avg_time
+            
+            # Paired t-tests for Statistical Significance (p-value)
+            # Catch warnings in case the arrays are identical (variance=0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                _, p_val_acc = stats.ttest_rel(q_data['acc'], c_data['acc'])
+                _, p_val_f1 = stats.ttest_rel(q_data['f1'], c_data['f1'])
+                
+            # If arrays are exactly the same, p-value returns NaN. Set to 1.0 (not significant).
+            if np.isnan(p_val_acc): p_val_acc = 1.0
+            if np.isnan(p_val_f1): p_val_f1 = 1.0
             
             # --- PRINT TABLE 1: QUANTUM ---
             print("\n[ QUANTUM MODEL PERFORMANCE ]")
@@ -187,6 +202,19 @@ class ExperimentRunner():
             print("-" * 50)
             print("\n")
             
+            # --- PRINT TABLE 3: STATISTICAL SIGNIFICANCE ---
+            print("\n[ STATISTICAL ANALYSIS (Paired t-test) ]")
+            print("-" * 65)
+            print(f"{'Metric':<8} | {'Delta (Q - C)':<15} | {'p-value':<10} | {'Significant (p<0.05)?'}")
+            print("-" * 65)
+            sig_acc = "YES (*)" if p_val_acc < 0.05 else "NO"
+            sig_f1 = "YES (*)" if p_val_f1 < 0.05 else "NO"
+            print(f"{'Accuracy':<8} | {delta_acc:>+14.2%} | {p_val_acc:>10.4f} | {sig_acc}")
+            print(f"{'F1 Score':<8} | {delta_f1:>+14.2f} | {p_val_f1:>10.4f} | {sig_f1}")
+            print(f"{'Time':<8} | QSVM was {time_ratio:.0f}x slower")
+            print("-" * 65)
+            print("\n")
+            
             # Store results
             self.results['x_values'].append(value)
             self.results['c_acc'].append(c_avg_acc)
@@ -200,6 +228,11 @@ class ExperimentRunner():
             self.results['q_f1'].append(q_avg_f1)
             self.results['q_f1_std'].append(q_std_f1)
             self.results['q_time'].append(q_avg_time)
+            
+            self.results['delta_acc'].append(delta_acc)
+            self.results['p_val_acc'].append(p_val_acc)
+            self.results['delta_f1'].append(delta_f1)
+            self.results['p_val_f1'].append(p_val_f1)
         
         # Plot results after all values complete
         self.plot_results(x_label, title_suffix)
@@ -251,16 +284,24 @@ class ExperimentRunner():
 
 # %%
 # CONFIGURATION AND EXECUTION
+NUM_DIMS = 4
+NUM_TRIALS = 5
+N_CLASS = 2
+
+ad_hoc = AdhocDataManager()
+csv = CSVDataManager(
+    filename="breast-cancer.csv", 
+    target_col="diagnosis",
+    num_dims=NUM_DIMS, 
+    n_class=N_CLASS
+)
 
 # Choose experiment mode: 'size' or 'imbalance'
 EXPERIMENT_MODE = 'size'
 
-NUM_DIMS = 4
-NUM_TRIALS = 3
+# Choose data manager/dataset: 'ad_hoc' or 'mnist'
+DATA_MANAGER = csv
 
-# Choose data manager/dataset to use
-adhoc_data_manager = AdhocDataManager()
-data_manager = DataManager(num_dims=NUM_DIMS)
 
 runner = ExperimentRunner()
 
@@ -269,7 +310,7 @@ if EXPERIMENT_MODE == 'size':
     TRAINING_SIZES = [20, 40, 60, 80, 100]
     runner.run_experiment(
         mode='size',
-        data_manager=adhoc_data_manager,
+        data_manager=DATA_MANAGER,
         num_dims=NUM_DIMS,
         num_trials=NUM_TRIALS,
         training_sizes=TRAINING_SIZES
@@ -281,7 +322,7 @@ elif EXPERIMENT_MODE == 'imbalance':
     FIXED_SIZE = 100
     runner.run_experiment(
         mode='imbalance',
-        data_manager=adhoc_data_manager,
+        data_manager=DATA_MANAGER,
         num_dims=NUM_DIMS,
         num_trials=NUM_TRIALS,
         imbalance_ratios=IMBALANCE_RATIOS,
