@@ -313,37 +313,3 @@ class ExperimentRunner():
         plt.show()
 
 # %%
-# CONFIGURATION AND EXECUTION
-NUM_DIMS = 4
-NUM_TRIALS = 5
-N_CLASS = 2
-FIXED_SIZE = 100
-
-# Choose experiment mode: 'size', 'imbalance', 'feature_complexity', 'margin', 'clusters', 'noise'
-EXPERIMENT_MODE = 'clusters'
-
-
-runner = ExperimentRunner()
-
-if EXPERIMENT_MODE == 'size':
-        csv = CSVDataManager(filename="breast-cancer.csv", target_col="diagnosis", num_dims=NUM_DIMS, n_class=N_CLASS)
-        runner.run_experiment(mode='size', data_manager=csv, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[20, 40, 60, 80, 100])
-        
-elif EXPERIMENT_MODE == 'imbalance':
-    csv = CSVDataManager(filename="breast-cancer.csv", target_col="diagnosis", num_dims=NUM_DIMS, n_class=N_CLASS)
-    runner.run_experiment(mode='imbalance', data_manager=csv, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[0.5, 0.6, 0.7, 0.8, 0.9], fixed_size=FIXED_SIZE)
-    
-elif EXPERIMENT_MODE == 'feature_complexity':
-    runner.run_experiment(mode='feature_complexity', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[2, 6, 10, 14, 18], fixed_size=FIXED_SIZE)
-    
-elif EXPERIMENT_MODE == 'margin':
-    runner.run_experiment(mode='margin', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[0.1, 0.5, 1.0, 1.5, 2.0], fixed_size=FIXED_SIZE)
-    
-elif EXPERIMENT_MODE == 'clusters':
-    # NOTE: n_informative must be >= n_classes * n_clusters_per_class
-    runner.run_experiment(mode='clusters', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[1, 2, 3, 4], fixed_size=FIXED_SIZE)
-    
-elif EXPERIMENT_MODE == 'noise':
-    # 0.0 is perfect data, 0.20 means 20% of data has explicitly wrong labels
-    runner.run_experiment(mode='noise', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[0.0, 0.05, 0.10, 0.15, 0.20], fixed_size=FIXED_SIZE)
-# %%
