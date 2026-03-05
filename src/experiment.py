@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn import svm, metrics
 
-from data_manager import CSVDataManager, AdhocDataManager
+from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
@@ -89,7 +89,7 @@ class ExperimentRunner():
         return score, f1, (end - start)
     
     def run_experiment(self, mode, data_manager, num_dims, num_trials, 
-                    training_sizes=None, imbalance_ratios=None, fixed_size=100):
+                    experiment_values=None, fixed_size=100):
         """
         Main experiment runner
         
@@ -102,22 +102,35 @@ class ExperimentRunner():
             imbalance_ratios: List of ratios (required if mode='imbalance')
             fixed_size: Training size when mode='imbalance'
         """
+        if experiment_values is None:
+            raise ValueError(f"experiment_values must be provided for mode='{mode}'")
+            
         if mode == 'size':
-            if training_sizes is None:
-                raise ValueError("training_sizes must be provided when mode='size'")
-            experiment_values = training_sizes
             x_label = 'Training Samples'
             title_suffix = 'vs Training Size'
             value_name = 'Training Size'
         elif mode == 'imbalance':
-            if imbalance_ratios is None:
-                raise ValueError("imbalance_ratios must be provided when mode='imbalance'")
-            experiment_values = imbalance_ratios
             x_label = 'Class Imbalance Ratio (proportion of class 0)'
             title_suffix = 'vs Class Imbalance'
             value_name = 'Ratio'
+        elif mode == 'feature_complexity':
+            x_label = 'Number of Informative Features (Before PCA)'
+            title_suffix = 'vs Informative Features'
+            value_name = 'Informative Features'
+        elif mode == 'margin':
+            x_label = 'Class Separation Margin (class_sep)'
+            title_suffix = 'vs Class Separation'
+            value_name = 'Class Separation'
+        elif mode == 'clusters':
+            x_label = 'Clusters per Class (Decision Boundary Non-Linearity)'
+            title_suffix = 'vs Clusters per Class'
+            value_name = 'Clusters/Class'
+        elif mode == 'noise':
+            x_label = 'Label Noise Fraction (flip_y)'
+            title_suffix = 'vs Label Noise'
+            value_name = 'Noise Fraction'
         else:
-            raise ValueError("mode must be 'size' or 'imbalance'")
+            raise ValueError("mode must be 'size', 'imbalance', 'feature_complexity', or 'margin'")
         
         for value in experiment_values:
             c_data = {'acc': [], 'f1': [], 'time': []}
@@ -127,15 +140,32 @@ class ExperimentRunner():
             print(f"RUNNING EXPERIMENT: {value_name} = {value}")
             print(f"{'='*60}")
             
+            if mode == 'feature_complexity':
+                print(f"Generating new synthetic dataset with n_informative={value}...")
+                data_manager = SyntheticDataManager(num_dims=num_dims, n_informative=value)
+            elif mode == 'margin':
+                print(f"Generating new synthetic dataset with class_sep={value}...")
+                data_manager = SyntheticDataManager(num_dims=num_dims, class_sep=value)
+            elif mode == 'clusters':
+                print(f"Generating new synthetic dataset with n_clusters_per_class={value}...")
+                data_manager = SyntheticDataManager(num_dims=num_dims, n_clusters_per_class=value)
+            elif mode == 'noise':
+                print(f"Generating new synthetic dataset with flip_y={value}...")
+                data_manager = SyntheticDataManager(num_dims=num_dims, flip_y=value)
+            
             for seed in range(num_trials):
                 # Get data based on mode
                 if mode == 'size':
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
                         train_size=value, seed=seed, imbalance_ratio=0.5
                     )
-                else:  # mode == 'imbalance'
+                elif mode == 'imbalance':
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
                         train_size=fixed_size, seed=seed, imbalance_ratio=value
+                    )
+                else:
+                    X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
+                        train_size=fixed_size, seed=seed, imbalance_ratio=0.5
                     )
                 
                 print(f"\nTrial {seed+1}/{num_trials}...")
@@ -287,45 +317,33 @@ class ExperimentRunner():
 NUM_DIMS = 4
 NUM_TRIALS = 5
 N_CLASS = 2
+FIXED_SIZE = 100
 
-ad_hoc = AdhocDataManager()
-csv = CSVDataManager(
-    filename="breast-cancer.csv", 
-    target_col="diagnosis",
-    num_dims=NUM_DIMS, 
-    n_class=N_CLASS
-)
-
-# Choose experiment mode: 'size' or 'imbalance'
-EXPERIMENT_MODE = 'size'
-
-# Choose data manager/dataset: 'ad_hoc' or 'mnist'
-DATA_MANAGER = csv
+# Choose experiment mode: 'size', 'imbalance', 'feature_complexity', 'margin', 'clusters', 'noise'
+EXPERIMENT_MODE = 'clusters'
 
 
 runner = ExperimentRunner()
 
 if EXPERIMENT_MODE == 'size':
-    # Training size experiment (balanced classes)
-    TRAINING_SIZES = [20, 40, 60, 80, 100]
-    runner.run_experiment(
-        mode='size',
-        data_manager=DATA_MANAGER,
-        num_dims=NUM_DIMS,
-        num_trials=NUM_TRIALS,
-        training_sizes=TRAINING_SIZES
-    )
-    
+        csv = CSVDataManager(filename="breast-cancer.csv", target_col="diagnosis", num_dims=NUM_DIMS, n_class=N_CLASS)
+        runner.run_experiment(mode='size', data_manager=csv, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[20, 40, 60, 80, 100])
+        
 elif EXPERIMENT_MODE == 'imbalance':
-    # Class imbalance experiment (fixed size)
-    IMBALANCE_RATIOS = [0.5, 0.6, 0.7, 0.8, 0.9]
-    FIXED_SIZE = 100
-    runner.run_experiment(
-        mode='imbalance',
-        data_manager=DATA_MANAGER,
-        num_dims=NUM_DIMS,
-        num_trials=NUM_TRIALS,
-        imbalance_ratios=IMBALANCE_RATIOS,
-        fixed_size=FIXED_SIZE
-    )
+    csv = CSVDataManager(filename="breast-cancer.csv", target_col="diagnosis", num_dims=NUM_DIMS, n_class=N_CLASS)
+    runner.run_experiment(mode='imbalance', data_manager=csv, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[0.5, 0.6, 0.7, 0.8, 0.9], fixed_size=FIXED_SIZE)
+    
+elif EXPERIMENT_MODE == 'feature_complexity':
+    runner.run_experiment(mode='feature_complexity', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[2, 6, 10, 14, 18], fixed_size=FIXED_SIZE)
+    
+elif EXPERIMENT_MODE == 'margin':
+    runner.run_experiment(mode='margin', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[0.1, 0.5, 1.0, 1.5, 2.0], fixed_size=FIXED_SIZE)
+    
+elif EXPERIMENT_MODE == 'clusters':
+    # NOTE: n_informative must be >= n_classes * n_clusters_per_class
+    runner.run_experiment(mode='clusters', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[1, 2, 3, 4], fixed_size=FIXED_SIZE)
+    
+elif EXPERIMENT_MODE == 'noise':
+    # 0.0 is perfect data, 0.20 means 20% of data has explicitly wrong labels
+    runner.run_experiment(mode='noise', data_manager=None, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, experiment_values=[0.0, 0.05, 0.10, 0.15, 0.20], fixed_size=FIXED_SIZE)
 # %%

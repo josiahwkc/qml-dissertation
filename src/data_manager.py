@@ -31,8 +31,8 @@ from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from qiskit_machine_learning.datasets import ad_hoc_data
 
-class BaseDataSplitter():
-    """Handles train/test splitting logic - shared utility"""
+class TrainingSampler():
+    """Samples training subsets with optional class imbalance"""
         
     @staticmethod
     def create_class_imbalance(X_pool, y_pool, train_size, seed, imbalance_ratio=0.5):
@@ -105,7 +105,7 @@ class AdhocDataManager():
         self.y_test_fixed = np.argmax(y_test_fixed, axis=1)
         
     def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        X_train, y_train = BaseDataSplitter.create_class_imbalance(
+        X_train, y_train = TrainingSampler.create_class_imbalance(
             self.X_pool, self.y_pool, train_size, seed, imbalance_ratio
         )
         
@@ -233,8 +233,65 @@ class CSVDataManager():
         X_test_processed = preprocessing_pipeline.transform(X_test)
         
         # Sample training subset
-        X_train_processed, y_train = BaseDataSplitter.create_class_imbalance(
+        X_train_processed, y_train = TrainingSampler.create_class_imbalance(
             X_pool_processed, y_pool, train_size, seed, imbalance_ratio
         )
         
         return X_train_processed, X_test_processed, y_train, y_test
+    
+
+class SyntheticDataManager():
+    """Generates synthetic data using scikit-learn's make_classification"""
+    def __init__(self, num_dims=4, n_samples=500, n_features=20, n_informative=10, 
+                 n_redundant=2, n_classes=2, n_clusters_per_class=2, flip_y=0.01, class_sep=1.0, random_state=42):
+        """
+        Args:
+            num_dims: Number of PCA components (qubits)
+            n_samples: Total samples
+            n_features: Raw features before PCA
+            n_informative: Number of informative features
+            n_redundant: Number of redundant features
+            n_classes: Number of classes
+            n_clusters_per_class: Number of clusters per class
+            flip_y: Fraction of samples whose class is assigned randomly
+            class_sep: Margin between data points. Larger values spread out the clusters/classes and make the classification task easier.
+            random_state: Random seed
+        """
+        self.num_dims = num_dims
+        
+        # Generate the synthetic dataset
+        self.X, self.y = datasets.make_classification(
+            n_samples=n_samples,
+            n_features=n_features,
+            n_informative=n_informative,
+            n_redundant=n_redundant,
+            n_classes=n_classes,
+            n_clusters_per_class=n_clusters_per_class,
+            flip_y=flip_y,
+            class_sep=class_sep,
+            random_state=random_state
+        )
+        
+    def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
+        """Create train/test split with preprocessing"""
+        X_pool, X_test, y_pool, y_test = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
+        )
+        
+        # Preprocessing
+        preprocessing_pipeline = Pipeline([
+            ('pca', PCA(n_components=self.num_dims)),
+            ('std_scaler', StandardScaler()), 
+            ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+        ])
+        
+        X_pool_processed = preprocessing_pipeline.fit_transform(X_pool)
+        X_test_processed = preprocessing_pipeline.transform(X_test)
+        
+        # Sample training subset
+        X_train_processed, y_train = TrainingSampler.create_class_imbalance(
+            X_pool_processed, y_pool, train_size, seed, imbalance_ratio
+        )
+        
+        return X_train_processed, X_test_processed, y_train, y_test
+# %%
