@@ -130,7 +130,36 @@ class ExperimentRunner():
             title_suffix = 'vs Label Noise'
             value_name = 'Noise Fraction'
         else:
-            raise ValueError("mode must be 'size', 'imbalance', 'feature_complexity', or 'margin'")
+            raise ValueError(f"Invalid mode: {mode}")
+        
+        # PRE-GENERATE datasets for synthetic modes
+        datasets_dict = {}
+        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
+            for value in experiment_values:
+                if mode == 'feature_complexity':
+                    datasets_dict[value] = SyntheticDataManager(
+                        num_dims=num_dims, 
+                        n_informative=value,
+                        random_state=42
+                    )
+                elif mode == 'margin':
+                    datasets_dict[value] = SyntheticDataManager(
+                        num_dims=num_dims, 
+                        class_sep=value,
+                        random_state=42
+                    )
+                elif mode == 'clusters':
+                    datasets_dict[value] = SyntheticDataManager(
+                        num_dims=num_dims, 
+                        n_clusters_per_class=value,
+                        random_state=42
+                    )
+                elif mode == 'noise':
+                    datasets_dict[value] = SyntheticDataManager(
+                        num_dims=num_dims, 
+                        flip_y=value,
+                        random_state=42
+                    )
         
         for value in experiment_values:
             c_data = {'acc': [], 'f1': [], 'time': []}
@@ -140,35 +169,27 @@ class ExperimentRunner():
             print(f"RUNNING EXPERIMENT: {value_name} = {value}")
             print(f"{'='*60}")
             
-            if mode == 'feature_complexity':
-                print(f"Generating new synthetic dataset with n_informative={value}...")
-                data_manager = SyntheticDataManager(num_dims=num_dims, n_informative=value)
-            elif mode == 'margin':
-                print(f"Generating new synthetic dataset with class_sep={value}...")
-                data_manager = SyntheticDataManager(num_dims=num_dims, class_sep=value)
-            elif mode == 'clusters':
-                print(f"Generating new synthetic dataset with n_clusters_per_class={value}...")
-                data_manager = SyntheticDataManager(num_dims=num_dims, n_clusters_per_class=value)
-            elif mode == 'noise':
-                print(f"Generating new synthetic dataset with flip_y={value}...")
-                data_manager = SyntheticDataManager(num_dims=num_dims, flip_y=value)
+            if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
+                data_manager = datasets_dict[value]
             
-            for seed in range(num_trials):
+            for trial in range(num_trials):
+                current_seed = 42 + trial
+                
                 # Get data based on mode
                 if mode == 'size':
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=value, seed=seed, imbalance_ratio=0.5
+                        train_size=value, seed=current_seed, imbalance_ratio=0.5
                     )
                 elif mode == 'imbalance':
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=fixed_size, seed=seed, imbalance_ratio=value
+                        train_size=fixed_size, seed=current_seed, imbalance_ratio=value
                     )
                 else:
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=fixed_size, seed=seed, imbalance_ratio=0.5
+                        train_size=fixed_size, seed=current_seed, imbalance_ratio=0.5
                     )
                 
-                print(f"\nTrial {seed+1}/{num_trials}...")
+                print(f"\nTrial {current_seed+1}/{num_trials}...")
                 
                 # Run Classical
                 c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te)
