@@ -242,8 +242,8 @@ class CSVDataManager():
 
 class SyntheticDataManager():
     """Generates synthetic data using scikit-learn's make_classification"""
-    def __init__(self, num_dims=4, n_samples=500, n_features=20, n_informative=10, 
-                 n_redundant=2, n_classes=2, n_clusters_per_class=2, flip_y=0.01, class_sep=1.0, random_state=42):
+    def __init__(self, num_dims=4, n_samples=500, n_informative=4, n_classes=2, 
+                 n_clusters_per_class=1, flip_y=0.01, class_sep=1.0, random_state=42):
         """
         Args:
             num_dims: Number of PCA components (qubits)
@@ -257,14 +257,14 @@ class SyntheticDataManager():
             class_sep: Margin between data points. Larger values spread out the clusters/classes and make the classification task easier.
             random_state: Random seed
         """
-        self.num_dims = num_dims
         
         # Generate the synthetic dataset
         self.X, self.y = datasets.make_classification(
             n_samples=n_samples,
-            n_features=n_features,
+            n_features=num_dims,
             n_informative=n_informative,
-            n_redundant=n_redundant,
+            n_redundant=0,
+            n_repeated=0,
             n_classes=n_classes,
             n_clusters_per_class=n_clusters_per_class,
             flip_y=flip_y,
@@ -280,7 +280,6 @@ class SyntheticDataManager():
         
         # Preprocessing
         preprocessing_pipeline = Pipeline([
-            ('pca', PCA(n_components=self.num_dims)),
             ('std_scaler', StandardScaler()), 
             ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
         ])
