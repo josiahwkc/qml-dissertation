@@ -23,9 +23,11 @@ import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
-from sklearn import svm, metrics
+from sklearn.svm import SVC
+from sklearn import metrics
 
 from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager
+from classical_tuner import ClassicalSVMTuner
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
@@ -33,6 +35,37 @@ from qiskit_machine_learning.kernels import FidelityQuantumKernel
 
 # %%
 # Experiment Class
+def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
+    """
+    Computes the Nadeau-Bengio corrected paired t-test for repeated 
+    train/test splits. Corrects for the variance underestimation caused 
+    by overlapping training sets.
+    
+    Ref: Nadeau, C., and Bengio, Y. (2003). Inference for the Generalization Error.
+    """
+    differences = np.array(q_scores) - np.array(c_scores)
+    k = len(differences)
+    
+    if k < 2:
+        return 1.0 # Need at least 2 trials for variance
+        
+    mean_diff = np.mean(differences)
+    var_diff = np.var(differences, ddof=1)
+    
+    if var_diff == 0:
+        return 1.0 # No variance, identical models
+        
+    # The Nadeau-Bengio variance correction
+    # (1/k) accounts for the number of trials
+    # (n_test/n_train) accounts for the overlap in training data
+    corrected_variance = var_diff * ((1 / k) + (n_test / n_train))
+    
+    t_stat = mean_diff / np.sqrt(corrected_variance)
+    
+    # Calculate two-tailed p-value
+    p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
+    return p_val
+
 class ExperimentRunner():
     def __init__(self):
         self.results = {
@@ -43,12 +76,13 @@ class ExperimentRunner():
             'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
         }
         
-    def run_classical(self, X_train, X_test, y_train, y_test):
+    def run_classical(self, X_train, X_test, y_train, y_test, cache_key=None):
         """
-        Runs Classical SVM (RBF Kernel)
+        Runs Classical SVM (RBF Kernel) with Hyperparameter Tuning
         """
-        clf = svm.SVC(kernel='rbf')
-        
+        best_params = ClassicalSVMTuner.get_best_params(X_train, y_train, cache_key)
+        clf = SVC(kernel='rbf', **best_params)
+    
         start_time = time.time()
         clf.fit(X_train, y_train)
         end_time = time.time()
@@ -77,7 +111,7 @@ class ExperimentRunner():
             print("This usually means N_DIM is too high or PCA failed.")
             exit()
             
-        qsvm = svm.SVC(kernel='precomputed')
+        qsvm = SVC(kernel='precomputed')
         qsvm.fit(matrix_train, y_train)
         end = time.time()
         
@@ -89,7 +123,7 @@ class ExperimentRunner():
         return score, f1, (end - start)
     
     def run_experiment(self, mode, data_manager, num_dims, num_trials, 
-                    experiment_values=None, fixed_size=100):
+                    experiment_values=None, fixed_size=100, random_state=42):
         """
         Main experiment runner
         
@@ -140,25 +174,25 @@ class ExperimentRunner():
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         n_informative=value,
-                        random_state=42
+                        random_state=random_state
                     )
                 elif mode == 'margin':
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         class_sep=value,
-                        random_state=42
+                        random_state=random_state
                     )
                 elif mode == 'clusters':
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         n_clusters_per_class=value,
-                        random_state=42
+                        random_state=random_state
                     )
                 elif mode == 'noise':
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         flip_y=value,
-                        random_state=42
+                        random_state=random_state
                     )
         
         for value in experiment_values:
@@ -173,26 +207,26 @@ class ExperimentRunner():
                 data_manager = datasets_dict[value]
             
             for trial in range(num_trials):
-                current_seed = 42 + trial
                 
                 # Get data based on mode
                 if mode == 'size':
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=value, seed=current_seed, imbalance_ratio=0.5
+                        train_size=value, seed=trial, imbalance_ratio=0.5
                     )
                 elif mode == 'imbalance':
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=fixed_size, seed=current_seed, imbalance_ratio=value
+                        train_size=fixed_size, seed=trial, imbalance_ratio=value
                     )
                 else:
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=fixed_size, seed=current_seed, imbalance_ratio=0.5
+                        train_size=fixed_size, seed=trial, imbalance_ratio=0.5
                     )
                 
-                print(f"\nTrial {current_seed+1}/{num_trials}...")
+                print(f"\nTrial {trial+1}/{num_trials}...")
                 
                 # Run Classical
-                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te)
+                cache_key = f"{mode}_{value}"
+                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, cache_key=cache_key)
                 c_data['acc'].append(c_score)
                 c_data['f1'].append(c_f1)
                 c_data['time'].append(c_time)
@@ -217,16 +251,22 @@ class ExperimentRunner():
             delta_f1 = q_avg_f1 - c_avg_f1
             time_ratio = q_avg_time / c_avg_time if c_avg_time > 0 else q_avg_time
             
-            # Paired t-tests for Statistical Significance (p-value)
-            # Catch warnings in case the arrays are identical (variance=0)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                _, p_val_acc = stats.ttest_rel(q_data['acc'], c_data['acc'])
-                _, p_val_f1 = stats.ttest_rel(q_data['f1'], c_data['f1'])
-                
-            # If arrays are exactly the same, p-value returns NaN. Set to 1.0 (not significant).
-            if np.isnan(p_val_acc): p_val_acc = 1.0
-            if np.isnan(p_val_f1): p_val_f1 = 1.0
+            # Effect Size (Cohen's d)
+            # Pooled standard deviation calculation
+            std_pooled_acc = np.sqrt((q_std_acc**2 + c_std_acc**2) / 2)
+            std_pooled_f1 = np.sqrt((q_std_f1**2 + c_std_f1**2) / 2)
+            
+            # Protect against division by zero if all trials are perfectly identical
+            cohen_d_acc = delta_acc / std_pooled_acc if std_pooled_acc > 0 else 0.0
+            cohen_d_f1 = delta_f1 / std_pooled_f1 if std_pooled_f1 > 0 else 0.0
+            
+            # NADEAU-BENGIO CORRECTED T-TEST
+            # Extract current train/test sizes from the last trial loop
+            n_train = len(X_tr)
+            n_test = len(X_te)
+            
+            p_val_acc = nadeau_bengio_corrected_ttest(q_data['acc'], c_data['acc'], n_train, n_test)
+            p_val_f1 = nadeau_bengio_corrected_ttest(q_data['f1'], c_data['f1'], n_train, n_test)
             
             # --- PRINT TABLE 1: QUANTUM ---
             print("\n[ QUANTUM MODEL PERFORMANCE ]")
@@ -254,16 +294,17 @@ class ExperimentRunner():
             print("\n")
             
             # --- PRINT TABLE 3: STATISTICAL SIGNIFICANCE ---
-            print("\n[ STATISTICAL ANALYSIS (Paired t-test) ]")
-            print("-" * 65)
-            print(f"{'Metric':<8} | {'Delta (Q - C)':<15} | {'p-value':<10} | {'Significant (p<0.05)?'}")
-            print("-" * 65)
+            print("\n[ STATISTICAL ANALYSIS (Nadeau-Bengio Corrected t-test & Effect Size) ]")
+            print("-" * 85)
+            print(f'{"Metric":<8} | {"Delta (Q-C)":<12} | {"Cohen\'s d":<10} | {"p-value":<10} | {"Significant (p<0.05)?"}')
+            print("-" * 85)
             sig_acc = "YES (*)" if p_val_acc < 0.05 else "NO"
             sig_f1 = "YES (*)" if p_val_f1 < 0.05 else "NO"
-            print(f"{'Accuracy':<8} | {delta_acc:>+14.2%} | {p_val_acc:>10.4f} | {sig_acc}")
-            print(f"{'F1 Score':<8} | {delta_f1:>+14.2f} | {p_val_f1:>10.4f} | {sig_f1}")
+            
+            print(f"{'Accuracy':<8} | {delta_acc:>+12.2%} | {cohen_d_acc:>10.2f} | {p_val_acc:>10.4f} | {sig_acc}")
+            print(f"{'F1 Score':<8} | {delta_f1:>+12.2f} | {cohen_d_f1:>10.2f} | {p_val_f1:>10.4f} | {sig_f1}")
             print(f"{'Time':<8} | QSVM was {time_ratio:.0f}x slower")
-            print("-" * 65)
+            print("-" * 85)
             print("\n")
             
             # Store results
