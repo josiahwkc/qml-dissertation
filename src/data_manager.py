@@ -257,7 +257,12 @@ class SyntheticDataManager():
             class_sep: Margin between data points. Larger values spread out the clusters/classes and make the classification task easier.
             random_state: Random seed
         """
-        
+        if n_informative > num_dims:
+            raise ValueError(
+                f"n_informative ({n_informative}) cannot exceed num_dims ({num_dims}). "
+                f"Set n_informative <= {num_dims}."
+            )
+            
         # Generate the synthetic dataset
         self.X, self.y = datasets.make_classification(
             n_samples=n_samples,
@@ -271,6 +276,11 @@ class SyntheticDataManager():
             class_sep=class_sep,
             random_state=random_state
         )
+        
+        n_noise = num_dims - n_informative
+        print(f"Generated synthetic data: {n_samples} samples, {num_dims} features")
+        print(f"  Feature composition: {n_informative} informative, {n_noise} noise")
+        print(f"  Classes: {n_classes}, Separation: {class_sep}, Label noise: {flip_y}")
         
     def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
         """Create train/test split with preprocessing"""
