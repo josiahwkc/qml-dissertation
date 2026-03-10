@@ -101,29 +101,30 @@ class ExperimentRunner():
         feature_map = ZZFeatureMap(feature_dimension=num_dims, reps=2, entanglement='linear')
         kernel = FidelityQuantumKernel(feature_map=feature_map)
         
-        start = time.time()
+        start_time = time.time()
         
         try:
             matrix_train = kernel.evaluate(x_vec=X_train)
             matrix_test = kernel.evaluate(x_vec=X_test, y_vec=X_train)
         except ValueError as e:
             print(f"\nCRITICAL ERROR: {e}")
-            print("This usually means N_DIM is too high or PCA failed.")
             exit()
             
         qsvm = SVC(kernel='precomputed')
         qsvm.fit(matrix_train, y_train)
-        end = time.time()
+        
+        end_time = time.time()
         
         y_pred = qsvm.predict(matrix_test)
         
+        # Calculate metrics
         score = metrics.accuracy_score(y_test, y_pred)
         f1 = metrics.f1_score(y_test, y_pred, average='weighted')
         
-        return score, f1, (end - start)
+        return score, f1, (end_time - start_time)
     
     def run_experiment(self, mode, data_manager, num_dims, num_trials, 
-                    experiment_values=None, fixed_size=100, random_state=42):
+                    experiment_values=None, fixed_size=100):
         """
         Main experiment runner
         
@@ -148,7 +149,7 @@ class ExperimentRunner():
             title_suffix = 'vs Class Imbalance'
             value_name = 'Ratio'
         elif mode == 'feature_complexity':
-            x_label = 'Number of Informative Features (Before PCA)'
+            x_label = 'Number of Informative Features'
             title_suffix = 'vs Informative Features'
             value_name = 'Informative Features'
         elif mode == 'margin':
@@ -174,25 +175,21 @@ class ExperimentRunner():
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         n_informative=value,
-                        random_state=random_state
                     )
                 elif mode == 'margin':
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         class_sep=value,
-                        random_state=random_state
                     )
                 elif mode == 'clusters':
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         n_clusters_per_class=value,
-                        random_state=random_state
                     )
                 elif mode == 'noise':
                     datasets_dict[value] = SyntheticDataManager(
                         num_dims=num_dims, 
                         flip_y=value,
-                        random_state=random_state
                     )
         
         for value in experiment_values:
@@ -221,7 +218,7 @@ class ExperimentRunner():
                     X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
                         train_size=fixed_size, seed=trial, imbalance_ratio=0.5
                     )
-                
+                    
                 print(f"\nTrial {trial+1}/{num_trials}...")
                 
                 # Run Classical
@@ -257,9 +254,16 @@ class ExperimentRunner():
             std_pooled_f1 = np.sqrt((q_std_f1**2 + c_std_f1**2) / 2)
             
             # Protect against division by zero if all trials are perfectly identical
-            cohen_d_acc = delta_acc / std_pooled_acc if std_pooled_acc > 0 else 0.0
-            cohen_d_f1 = delta_f1 / std_pooled_f1 if std_pooled_f1 > 0 else 0.0
-            
+            if std_pooled_acc == 0:
+                cohen_d_acc = float('inf') if abs(delta_acc) > 0 else 0.0
+            else:
+                cohen_d_acc = delta_acc / std_pooled_acc
+                
+            if std_pooled_f1 == 0:
+                cohen_d_f1 = float('inf') if abs(delta_f1) > 0 else 0.0
+            else:
+                cohen_d_f1 = delta_f1 / std_pooled_f1
+                            
             # NADEAU-BENGIO CORRECTED T-TEST
             # Extract current train/test sizes from the last trial loop
             n_train = len(X_tr)
