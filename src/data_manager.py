@@ -223,8 +223,8 @@ class CSVDataManager():
         
         # Preprocessing pipeline
         preprocessing_pipeline = Pipeline([
-            ('pca', PCA(n_components=self.num_dims)),
-            ('std_scaler', StandardScaler()), 
+            ('std_scaler', StandardScaler()),
+            ('pca', PCA(n_components=self.num_dims)), 
             ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
         ])
         
@@ -276,11 +276,6 @@ class SyntheticDataManager():
             class_sep=class_sep,
             random_state=random_state
         )
-        
-        n_noise = num_dims - n_informative
-        print(f"Generated synthetic data: {n_samples} samples, {num_dims} features")
-        print(f"  Feature composition: {n_informative} informative, {n_noise} noise")
-        print(f"  Classes: {n_classes}, Separation: {class_sep}, Label noise: {flip_y}")
         
     def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
         """Create train/test split with preprocessing"""
