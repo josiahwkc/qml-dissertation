@@ -15,7 +15,6 @@ class ClassicalSVMTuner:
             cache_key: Unique identifier for this dataset/config
         """
         if cache_key and cache_key in cls._cached_params:
-            print(f"Using cached hyperparameters for {cache_key}")
             return cls._cached_params[cache_key]
         
         param_grid = {
@@ -33,9 +32,7 @@ class ClassicalSVMTuner:
         
         grid_search.fit(X_train, y_train)
         best_params = grid_search.best_params_
-        
-        print(f"Optimal params: {best_params}")
-        
+                
         if cache_key:
             cls._cached_params[cache_key] = best_params
         
