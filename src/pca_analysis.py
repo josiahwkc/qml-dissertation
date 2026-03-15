@@ -1,101 +1,72 @@
-"""
-PCA Cumulative Explained Variance Analysis
-========================================
-Author: Josiah Chan (K23091949)
-
-Description:
-  Generates a publication-ready plot showing the cumulative explained variance 
-  of PCA on the dataset. This is used to mathematically justify the choice of 
-  N_DIM (number of qubits) for the quantum circuit by showing how much 
-  information is retained vs. lost.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-
+# Assuming CSVDataManager is imported as before
 from data_manager import CSVDataManager
 
-def plot_pca_variance(csv_filename, target_col, target_dimensions=4, max_samples=1000):
+def plot_pca_variance(csv_filename, target_col, max_samples=1000, limit=16):
     """
-    Loads dataset via CSVDataManager, applies PCA, and plots the explained variance.
-    
-    Args:
-        csv_filename: Name of the dataset file.
-        target_col: The target label column to exclude from PCA.
-        target_dimensions: The N_DIM chosen for the QSVM (to highlight on graph).
-        max_samples: Maximum samples to load (passed to CSVDataManager).
+    Plots cumulative explained variance for the first 'limit' components.
     """
-    print(f"Analyzing PCA Variance for {csv_filename}...")
+    print(f"Analyzing PCA Variance for {csv_filename} (Max {limit} components)...")
     
-    # 1. Load Data using your existing data manager
-    # This automatically handles missing values, categorical encoding, and subsampling
-    manager = CSVDataManager(
-        filename=csv_filename, 
-        target_col=target_col,
-        max_samples=max_samples
-    )
-    
-    # Extract the cleaned, unscaled feature matrix
+    manager = CSVDataManager(filename=csv_filename, target_col=target_col, max_samples=max_samples)
     X_raw = manager.X
     
-    print(f"Extracted feature matrix shape: {X_raw.shape}")
-    
-    # 2. Scale Data (CRITICAL before PCA)
+    # 1. Scale and Fit
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_raw)
     
-    # 3. Fit PCA on ALL available dimensions to see the full spectrum
     pca = PCA()
     pca.fit(X_scaled)
     
-    # Calculate variances
-    exp_var = pca.explained_variance_ratio_ * 100
-    cum_exp_var = np.cumsum(exp_var)
+    # 2. Extract and Slice to the first 16 components
+    exp_var_full = pca.explained_variance_ratio_ * 100
+    cum_exp_var_full = np.cumsum(exp_var_full)
     
-    # 4. Generate Publication-Ready Plot
-    plt.figure(figsize=(10, 6))
+    # Slice arrays to the user-defined limit
+    plot_limit = min(limit, len(cum_exp_var_full))
+    exp_var = exp_var_full[:plot_limit]
+    cum_exp_var = cum_exp_var_full[:plot_limit]
+    indices = range(1, plot_limit + 1)
     
-    # Bar chart for individual variance
-    plt.bar(range(1, len(exp_var) + 1), exp_var, alpha=0.5, align='center',
+    # 3. Generate Plot
+    plt.figure(figsize=(12, 6))
+    
+    # Individual variance bars
+    plt.bar(indices, exp_var, alpha=0.4, align='center',
             label='Individual Explained Variance', color='steelblue')
             
-    # Step plot for cumulative variance
-    plt.step(range(1, len(cum_exp_var) + 1), cum_exp_var, where='mid',
+    # Cumulative variance step plot
+    plt.step(indices, cum_exp_var, where='mid',
              label='Cumulative Explained Variance', color='darkorange', linewidth=2)
-    
-    # Safety check: Ensure target_dimensions doesn't exceed available features
-    plot_dim = min(target_dimensions, len(cum_exp_var))
-    variance_at_target = cum_exp_var[plot_dim - 1]
-    
-    # Highlight the chosen N_DIM (e.g., 4 qubits)
-    plt.axvline(x=plot_dim, color='red', linestyle='--', alpha=0.7)
-    plt.axhline(y=variance_at_target, color='red', linestyle='--', alpha=0.7)
-    
-    # Add an annotation dot and text
-    plt.plot(plot_dim, variance_at_target, 'ro')
-    plt.annotate(f'{variance_at_target:.1f}% variance\nat N={plot_dim}', 
-                 xy=(plot_dim, variance_at_target), 
-                 xytext=(plot_dim + 1, max(10, variance_at_target - 15)),
-                 arrowprops=dict(facecolor='black', shrink=0.05, width=1.5, headwidth=6))
 
-    # Formatting
+    # 4. Label every N (1 through 16)
+    for i, variance in enumerate(cum_exp_var):
+        plt.text(i + 1, variance + 1.5, f'{variance:.1f}%', 
+                 ha='center', va='bottom', fontsize=8, fontweight='bold')
+        
+        # Point marker at each step
+        plt.plot(i + 1, variance, 'o', color='darkorange', markersize=4)
+
+    # 5. Formatting
     plt.ylabel('Explained Variance Ratio (%)')
     plt.xlabel('Principal Component Index')
-    plt.title(f'PCA Explained Variance: {csv_filename}')
-    plt.xticks(range(1, len(exp_var) + 1, max(1, len(exp_var)//10))) # Make x-axis readable
-    plt.ylim(0, 105)
-    plt.legend(loc='best')
-    plt.grid(True, alpha=0.3)
+    plt.title(f'Top {plot_limit} PCA Components: {csv_filename}')
+    
+    plt.xticks(indices) # Force show all 16 indices
+    plt.ylim(0, 110)
+    plt.legend(loc='lower right')
+    plt.grid(axis='y', linestyle='--', alpha=0.3)
     plt.tight_layout()
     
-    # Show and Save
-    output_filename = f"pca_variance_{csv_filename.split('.')[0]}.png"
+    # Save and Show
+    output_filename = f"pca_top_{plot_limit}_{csv_filename.split('.')[0]}.png"
     plt.savefig(output_filename, dpi=300)
     print(f"Graph saved as {output_filename}")
     plt.show()
 
-
-plot_pca_variance("breast-cancer.csv", "diagnosis", target_dimensions=5)
+# Run it
+plot_pca_variance("mnist_train.csv", "label", limit=16)
