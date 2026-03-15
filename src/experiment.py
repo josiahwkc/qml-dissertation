@@ -200,26 +200,41 @@ class ExperimentRunner():
             print(f"RUNNING EXPERIMENT: {value_name} = {value}")
             print(f"{'='*60}")
             
-            if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
-                data_manager = datasets_dict[value]
+            is_kfold = mode in ['feature_complexity', 'margin', 'clusters', 'noise']
             
-            for trial in range(num_trials):
+            if is_kfold:
+                print(f"Executing {num_trials}-Fold Cross Validation...")
+                current_dm = datasets_dict[value]
                 
-                # Get data based on mode
-                if mode == 'size':
-                    X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=value, seed=trial, imbalance_ratio=0.5
-                    )
-                elif mode == 'imbalance':
-                    X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=fixed_size, seed=trial, imbalance_ratio=value
-                    )
-                else:
-                    X_tr, X_te, y_tr, y_te = data_manager.get_data_split(
-                        train_size=fixed_size, seed=trial, imbalance_ratio=0.5
-                    )
-                    
-                print(f"\nTrial {trial+1}/{num_trials}...")
+                def fold_generator():
+                    for idx, splits in enumerate(current_dm.get_kfold_splits(
+                        k_folds=num_trials, train_size=fixed_size, 
+                        imbalance_ratio=0.5
+                    )):
+                        yield idx, splits
+                
+                data_iterator = fold_generator()
+                
+            else:
+                print(f"Executing Monte Carlo Random Sub-Sampling ({num_trials} trials)...")
+                
+                def sweep_generator():
+                    for trial in range(num_trials):
+                        if mode == 'size':
+                            yield trial, data_manager.get_data_split(
+                                train_size=value, seed=trial, imbalance_ratio=0.5
+                            )
+                        elif mode == 'imbalance':
+                            yield trial, data_manager.get_data_split(
+                                train_size=fixed_size, seed=trial, imbalance_ratio=value
+                            )
+                
+                data_iterator = sweep_generator()
+            
+            for idx, (X_tr, X_te, y_tr, y_te) in data_iterator:
+                
+                label = "Fold" if is_kfold else "Trial"
+                print(f"\n{label} {idx+1}/{num_trials} (Train: {len(X_tr)}, Test: {len(X_te)})...")
                 
                 # Run Classical
                 cache_key = f"{mode}_{value}"
