@@ -26,8 +26,8 @@ from scipy import stats
 from sklearn.svm import SVC
 from sklearn import metrics
 
-from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager
-from classical_tuner import ClassicalSVMTuner
+from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager, TrainingSampler
+from tuner import ClassicalSVMTuner, QuantumSVMTuner
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
@@ -94,11 +94,11 @@ class ExperimentRunner():
         
         return score, f1, (end_time - start_time)
     
-    def run_quantum(self, X_train, X_test, y_train, y_test, num_dims):
+    def run_quantum(self, X_train, X_test, y_train, y_test, num_dims, cache_key=None):
         """
         Runs Quantum SVM (ZZFeatureMap + FidelityKernel)
         """
-        feature_map = ZZFeatureMap(feature_dimension=num_dims, reps=2, entanglement='linear')
+        feature_map = ZZFeatureMap(feature_dimension=num_dims, reps=1, entanglement='linear')
         kernel = FidelityQuantumKernel(feature_map=feature_map)
         
         start_time = time.time()
@@ -207,31 +207,35 @@ class ExperimentRunner():
                 current_dm = datasets_dict[value]
                 
                 def fold_generator():
-                    for idx, splits in enumerate(current_dm.get_kfold_splits(
-                        k_folds=num_trials, train_size=fixed_size, 
-                        imbalance_ratio=0.5
-                    )):
+                    for idx, splits in enumerate(current_dm.get_kfold_splits(k_folds=num_trials, train_size=fixed_size)):
                         yield idx, splits
                 
                 data_iterator = fold_generator()
                 
             else:
                 print(f"Executing Monte Carlo Random Sub-Sampling ({num_trials} trials)...")
+                current_dm = data_manager
                 
                 def sweep_generator():
                     for trial in range(num_trials):
-                        if mode == 'size':
-                            yield trial, data_manager.get_data_split(
-                                train_size=value, seed=trial, imbalance_ratio=0.5
-                            )
-                        elif mode == 'imbalance':
-                            yield trial, data_manager.get_data_split(
-                                train_size=fixed_size, seed=trial, imbalance_ratio=value
-                            )
+                        X_pool, X_val, X_te, y_pool, y_val, y_te = current_dm.get_data_split(seed=trial)
+                        
+                        current_train_size = value if mode == 'size' else fixed_size
+                        current_imbalance = value if mode == 'imbalance' else 0.5
+                        
+                        X_tr, y_tr = TrainingSampler.create_class_imbalance(
+                            X_pool=X_pool, 
+                            y_pool=y_pool, 
+                            train_size=current_train_size, 
+                            seed=trial, 
+                            imbalance_ratio=current_imbalance
+                        )
+                        
+                        yield trial, (X_tr, X_val, X_te, y_tr, y_val, y_te)
                 
                 data_iterator = sweep_generator()
             
-            for idx, (X_tr, X_te, y_tr, y_te) in data_iterator:
+            for idx, (X_tr, X_val, X_te, y_tr, y_val, y_te) in data_iterator:
                 
                 label = "Fold" if is_kfold else "Trial"
                 print(f"\n{label} {idx+1}/{num_trials} (Train: {len(X_tr)}, Test: {len(X_te)})...")
