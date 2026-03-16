@@ -225,7 +225,7 @@ class CSVDataManager():
             #     X_test_processed, y_test = X_test_processed[idx], y_test[idx]
                 
             # Yield the fold to the experiment runner
-            yield X_train_processed, X_test_processed, X_val_processed, y_train_raw, y_test, y_val
+            yield X_train_processed, X_val_processed, X_test_processed, y_train_raw, y_val, y_test
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
@@ -251,7 +251,7 @@ class CSVDataManager():
         X_test_processed = preprocessing_pipeline.transform(X_test)
         X_val_processed = preprocessing_pipeline.transform(X_val)
         
-        return X_train_processed, X_test_processed, X_val_processed, y_train, y_test, y_val
+        return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
     
 
 class SyntheticDataManager():
@@ -323,7 +323,7 @@ class SyntheticDataManager():
             #     X_test_processed, y_test = X_test_processed[idx], y_test[idx]
                 
             # Yield the fold to the experiment runner
-            yield X_train_processed, X_test_processed, X_val_processed, y_train_raw, y_test, y_val
+            yield X_train_processed, X_val_processed, X_test_processed, y_train_raw, y_val, y_test
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
@@ -347,5 +347,5 @@ class SyntheticDataManager():
         X_test_processed = preprocessing_pipeline.transform(X_test)
         X_val_processed = preprocessing_pipeline.transform(X_val)
         
-        return X_train_processed, X_test_processed, X_val_processed, y_train, y_test, y_val
+        return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
 # %%
