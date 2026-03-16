@@ -192,15 +192,21 @@ class CSVDataManager():
             print(f"Warning: Only {self.X.shape[1]} features available, reducing num_dims to {self.X.shape[1]}")
             self.num_dims = self.X.shape[1]
             
-    def get_kfold_splits(self, seed, k_folds=5, train_size=None, imbalance_ratio=0.5):
+    def get_kfold_splits(self, seed, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
         """
+        # Split into pool and test
+        X_pool, X_test, y_pool, y_test = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
+        )
+        
         skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
         
-        for train_idx, test_idx in skf.split(self.X, self.y):
-            X_train_raw, X_test_raw = self.X[train_idx], self.X[test_idx]
-            y_train_raw, y_test = self.y[train_idx], self.y[test_idx]
+        # Split X_pool into training and validation folds
+        for train_idx, val_idx in skf.split(X_pool, y_pool):
+            X_train_raw, X_val_raw = X_pool[train_idx], X_pool[val_idx]
+            y_train_raw, y_val = y_pool[train_idx], y_pool[val_idx]
             
             preprocessing_pipeline = Pipeline([
                 ('std_scaler', StandardScaler()),
@@ -209,23 +215,17 @@ class CSVDataManager():
             ])
             
             X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
-            X_test_processed = preprocessing_pipeline.transform(X_test_raw)
-            
-            # Apply the "Data Diet" or "Class Imbalance" logic to the training folds
-            target_train_size = train_size if train_size is not None else len(y_train_raw)
-            
-            X_train_final, y_train_final = TrainingSampler.create_class_imbalance(
-                X_train_processed, y_train_raw, target_train_size, seed, imbalance_ratio
-            )
+            X_test_processed = preprocessing_pipeline.transform(X_test)
+            X_val_processed = preprocessing_pipeline.transform(X_val_raw)
             
             # 4. Safety Check: Cap test set size to prevent Quantum simulation timeouts
-            if len(y_test) > self.max_test_size:
-                rng = np.random.default_rng(seed)
-                idx = rng.choice(len(y_test), self.max_test_size, replace=False)
-                X_test_processed, y_test = X_test_processed[idx], y_test[idx]
+            # if len(y_test) > self.max_test_size:
+            #     rng = np.random.default_rng(seed)
+            #     idx = rng.choice(len(y_test), self.max_test_size, replace=False)
+            #     X_test_processed, y_test = X_test_processed[idx], y_test[idx]
                 
             # Yield the fold to the experiment runner
-            yield X_train_final, X_test_processed, y_train_final, y_test
+            yield X_train_processed, X_test_processed, X_val_processed, y_train_raw, y_test, y_val
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
@@ -291,32 +291,30 @@ class SyntheticDataManager():
             random_state=random_state
         )
         
-    def get_kfold_splits(self, k_folds=5, train_size=None, imbalance_ratio=0.5, seed=42):
+    def get_kfold_splits(self, seed, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
         """
+        # Split into pool and test
+        X_pool, X_test, y_pool, y_test = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
+        )
+        
         skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
         
-        for train_idx, test_idx in skf.split(self.X, self.y):
-            # 1. Isolate the raw k-1 training folds and 1 test fold
-            X_train_raw, X_test_raw = self.X[train_idx], self.X[test_idx]
-            y_train_raw, y_test = self.y[train_idx], self.y[test_idx]
+        # Split X_pool into training and validation folds
+        for train_idx, val_idx in skf.split(X_pool, y_pool):
+            X_train_raw, X_val_raw = X_pool[train_idx], X_pool[val_idx]
+            y_train_raw, y_val = y_pool[train_idx], y_pool[val_idx]
             
-            # 2. Fit pipeline ONLY on the training folds (Prevents Data Leakage)
             preprocessing_pipeline = Pipeline([
                 ('std_scaler', StandardScaler()),
                 ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
             ])
             
             X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
-            X_test_processed = preprocessing_pipeline.transform(X_test_raw)
-            
-            # 3. Apply the "Data Diet" or "Class Imbalance" logic to the training folds
-            target_train_size = train_size if train_size is not None else len(y_train_raw)
-            
-            X_train_final, y_train_final = TrainingSampler.create_class_imbalance(
-                X_train_processed, y_train_raw, target_train_size, seed, imbalance_ratio
-            )
+            X_test_processed = preprocessing_pipeline.transform(X_test)
+            X_val_processed = preprocessing_pipeline.transform(X_val_raw)
             
             # 4. Safety Check: Cap test set size to prevent Quantum simulation timeouts
             # if len(y_test) > self.max_test_size:
@@ -325,7 +323,7 @@ class SyntheticDataManager():
             #     X_test_processed, y_test = X_test_processed[idx], y_test[idx]
                 
             # Yield the fold to the experiment runner
-            yield X_train_final, X_test_processed, y_train_final, y_test
+            yield X_train_processed, X_test_processed, X_val_processed, y_train_raw, y_test, y_val
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
