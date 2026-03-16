@@ -20,9 +20,9 @@ NUM_TRIALS = 10 #30        # Number of random seeds to average over (min 5 for s
 N_CLASS = 2           # Binary classification
 FIXED_SIZE = 100      # Default training size for non-'size' experiments
 
-# Choose experiment mode: 
-# 'size', 'imbalance', 'feature_complexity', 'margin', 'clusters', or 'noise'
-EXPERIMENT_MODE = 'clusters'
+print("Choose an experiment mode")
+print("\n'size', 'imbalance', 'feature_complexity', 'margin', 'clusters', or 'noise'")
+EXPERIMENT_MODE = input()
 
 
 def main():
