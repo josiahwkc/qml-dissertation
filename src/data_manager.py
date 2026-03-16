@@ -36,44 +36,19 @@ class TrainingSampler():
         
     @staticmethod
     def create_class_imbalance(X_pool, y_pool, train_size, seed, imbalance_ratio=0.5):
-        num_classes = len(np.unique(y_pool))
         rng = np.random.default_rng(seed)
         
-        if num_classes == 2:
-            # Binary classification - apply imbalance
-            X_pool_class0 = X_pool[y_pool == 0]
-            X_pool_class1 = X_pool[y_pool == 1]
-            
-            n_class0 = int(train_size * imbalance_ratio)
-            n_class1 = train_size - n_class0
-            
-            idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
-            idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
-            
-            X_train = np.vstack([X_pool_class0[idx0], X_pool_class1[idx1]])
-            y_train = np.array([0] * len(idx0) + [1] * len(idx1))
-            
-        else:
-            # Multi-class - balanced sampling across all classes            
-            samples_per_class = train_size // num_classes
-            remainder = train_size % num_classes
-            
-            X_train_list = []
-            y_train_list = []
-            
-            for class_label in range(num_classes):
-                X_class = X_pool[y_pool == class_label]
-                
-                # Distribute remainder across first few classes
-                n_samples = samples_per_class + (1 if class_label < remainder else 0)
-                n_samples = min(n_samples, len(X_class))
-                
-                idx = rng.choice(len(X_class), size=n_samples, replace=False)
-                X_train_list.append(X_class[idx])
-                y_train_list.append(np.full(len(idx), class_label))
-            
-            X_train = np.vstack(X_train_list)
-            y_train = np.concatenate(y_train_list)
+        X_pool_class0 = X_pool[y_pool == 0]
+        X_pool_class1 = X_pool[y_pool == 1]
+        
+        n_class0 = int(train_size * imbalance_ratio)
+        n_class1 = train_size - n_class0
+        
+        idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
+        idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
+        
+        X_train = np.vstack([X_pool_class0[idx0], X_pool_class1[idx1]])
+        y_train = np.array([0] * len(idx0) + [1] * len(idx1))
         
         # Shuffle
         shuffle_idx = rng.permutation(len(y_train))
@@ -104,12 +79,15 @@ class AdhocDataManager():
         self.X_test_fixed = X_test_fixed
         self.y_test_fixed = np.argmax(y_test_fixed, axis=1)
         
-    def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        X_train, y_train = TrainingSampler.create_class_imbalance(
-            self.X_pool, self.y_pool, train_size, seed, imbalance_ratio
+    def get_data_split(self, seed):
+        """Creates train/val/test split."""
+        
+        # Split the training pool into train (95%) and validation (5%)
+        X_train, X_val, y_train, y_val = train_test_split(
+            self.X_pool, self.y_pool, test_size=0.05, random_state=seed, stratify=self.y_pool
         )
         
-        return X_train, self.X_test_fixed, y_train, self.y_test_fixed
+        return X_train, X_val, self.X_test_fixed, y_train, y_val, self.y_test_fixed
 
 
 class CSVDataManager():
@@ -249,30 +227,31 @@ class CSVDataManager():
             # Yield the fold to the experiment runner
             yield X_train_final, X_test_processed, y_train_final, y_test
             
-    def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        """Create train/test split with preprocessing"""
+    def get_data_split(self, seed):
+        """Create train/test/validation split with preprocessing"""
         # Split into pool and test
         X_pool, X_test, y_pool, y_test = train_test_split(
             self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
         )
         
+        # Split into train and validation
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_pool, y_pool, test_size=0.05, random_state=seed, stratify=y_pool
+        )
+        
         # Preprocessing pipeline
         preprocessing_pipeline = Pipeline([
-            ('pca', PCA(n_components=self.num_dims)),
             ('std_scaler', StandardScaler()),
+            ('pca', PCA(n_components=self.num_dims)),
             ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
         ])
         
-        # Fit on pool, transform both
-        X_pool_processed = preprocessing_pipeline.fit_transform(X_pool)
+        # Fit on X_train, transform all
+        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
         X_test_processed = preprocessing_pipeline.transform(X_test)
+        X_val_processed = preprocessing_pipeline.transform(X_val)
         
-        # Sample training subset
-        X_train_processed, y_train = TrainingSampler.create_class_imbalance(
-            X_pool_processed, y_pool, train_size, seed, imbalance_ratio
-        )
-        
-        return X_train_processed, X_test_processed, y_train, y_test
+        return X_train_processed, X_test_processed, X_val_processed, y_train, y_test, y_val
     
 
 class SyntheticDataManager():
@@ -348,10 +327,16 @@ class SyntheticDataManager():
             # Yield the fold to the experiment runner
             yield X_train_final, X_test_processed, y_train_final, y_test
             
-    def get_data_split(self, train_size, seed, imbalance_ratio=0.5):
-        """Create train/test split with preprocessing"""
+    def get_data_split(self, seed):
+        """Create train/test/validation split with preprocessing"""
+        # Split into pool and test
         X_pool, X_test, y_pool, y_test = train_test_split(
             self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
+        )
+        
+        # Split into train and validation
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_pool, y_pool, test_size=0.05, random_state=seed, stratify=y_pool
         )
         
         # Preprocessing
@@ -360,13 +345,9 @@ class SyntheticDataManager():
             ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
         ])
         
-        X_pool_processed = preprocessing_pipeline.fit_transform(X_pool)
+        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
         X_test_processed = preprocessing_pipeline.transform(X_test)
+        X_val_processed = preprocessing_pipeline.transform(X_val)
         
-        # Sample training subset
-        X_train_processed, y_train = TrainingSampler.create_class_imbalance(
-            X_pool_processed, y_pool, train_size, seed, imbalance_ratio
-        )
-        
-        return X_train_processed, X_test_processed, y_train, y_test
+        return X_train_processed, X_test_processed, X_val_processed, y_train, y_test, y_val
 # %%
