@@ -2,6 +2,7 @@ matplotlib==3.10.8
 numpy==2.4.2
 pandas==3.0.1
 qiskit==1.4.5
+qiskit-aer==0.15.1
 qiskit_machine_learning==0.8.4
 scikit_learn==1.8.0
 scipy==1.15.3
