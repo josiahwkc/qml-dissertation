@@ -11,9 +11,8 @@ import time
 import numpy as np
 from sklearn import metrics
 from sklearn.svm import SVC
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from qiskit.circuit.library import ZZFeatureMap
-from qiskit_machine_learning.kernels import FidelityQuantumKernel
+from qiskit_machine_learning.kernels import FidelityStatevectorKernel
 
 
 class ClassicalSVMTuner:
@@ -135,12 +134,14 @@ class QuantumSVMTuner:
                     reps=reps, 
                     entanglement=entanglement
                 )
-                kernel = FidelityQuantumKernel(feature_map=feature_map)
+                kernel = FidelityStatevectorKernel(feature_map=feature_map)
                 
                 # Precompute kernel matrices (expensive!)
                 try:
                     matrix_train = kernel.evaluate(x_vec=X_train)
+                    print("Train matrix done")
                     matrix_val = kernel.evaluate(x_vec=X_val, y_vec=X_train)
+                    print("Test matrix done")
                 except ValueError as e:
                     if verbose:
                         print(f"       [!] Kernel evaluation failed: {e}")
