@@ -139,9 +139,7 @@ class QuantumSVMTuner:
                 # Precompute kernel matrices (expensive!)
                 try:
                     matrix_train = kernel.evaluate(x_vec=X_train)
-                    print("Train matrix done")
                     matrix_val = kernel.evaluate(x_vec=X_val, y_vec=X_train)
-                    print("Test matrix done")
                 except ValueError as e:
                     if verbose:
                         print(f"       [!] Kernel evaluation failed: {e}")
