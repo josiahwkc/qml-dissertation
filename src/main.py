@@ -20,8 +20,8 @@ NUM_TRIALS = 10 #30        # Number of random seeds to average over (min 5 for s
 N_CLASS = 2           # Binary classification
 FIXED_SIZE = 100      # Default training size for non-'size' experiments
 
-print("Choose an experiment mode")
-print("\n'size', 'imbalance', 'feature_complexity', 'margin', 'clusters', or 'noise'")
+print("Choose an experiment mode:")
+print("['size', 'imbalance', 'feature_complexity', 'margin', 'clusters', or 'noise']\n")
 EXPERIMENT_MODE = input()
 
 
@@ -30,7 +30,7 @@ def main():
     runner = ExperimentRunner()
 
     if EXPERIMENT_MODE == 'size':
-        csv = CSVDataManager(filename="fashion-mnist_train.csv", target_col="label", num_dims=NUM_DIMS, n_class=N_CLASS)
+        csv = CSVDataManager(filename="mnist_train.csv", target_col="label", num_dims=NUM_DIMS, n_class=N_CLASS)
         runner.run_experiment(
             mode='size', data_manager=csv, num_dims=NUM_DIMS, num_trials=NUM_TRIALS, 
             experiment_values=[20, 40, 60, 80, 100]
