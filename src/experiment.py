@@ -28,6 +28,7 @@ from sklearn import metrics
 
 from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager, TrainingSampler
 from tuner import ClassicalSVMTuner, QuantumSVMTuner
+from classical_tuner import OldClassicalSVMTuner
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
@@ -75,13 +76,12 @@ class ExperimentRunner():
             'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
             'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
         }
+       
+    def run_classical(self, X_train, X_test, y_train, y_test, params, cache_key=None):
+        """Runs Classical SVM (RBF Kernel) with locked parameters"""
+        # best_params = OldClassicalSVMTuner.get_best_params(X_train, y_train, cache_key)
         
-    def run_classical(self, X_train, X_test, y_train, y_test, cache_key=None):
-        """
-        Runs Classical SVM (RBF Kernel) with Hyperparameter Tuning
-        """
-        best_params = ClassicalSVMTuner.get_best_params(X_train, y_train, cache_key)
-        clf = SVC(kernel='rbf', **best_params)
+        clf = SVC(kernel='rbf', **params)
     
         start_time = time.time()
         clf.fit(X_train, y_train)
@@ -94,30 +94,35 @@ class ExperimentRunner():
         
         return score, f1, (end_time - start_time)
     
-    def run_quantum(self, X_train, X_test, y_train, y_test, num_dims, cache_key=None):
-        """
-        Runs Quantum SVM (ZZFeatureMap + FidelityKernel)
-        """
-        feature_map = ZZFeatureMap(feature_dimension=num_dims, reps=1, entanglement='linear')
+    def run_quantum(self, X_train, X_test, y_train, y_test, num_dims, params):
+        """Runs Quantum SVM with locked parameters"""
+        
+        feature_map = ZZFeatureMap(
+            feature_dimension=num_dims, 
+            reps=params['reps'], 
+            entanglement=params['entanglement']
+        )
+
         kernel = FidelityQuantumKernel(feature_map=feature_map)
-        
+                
         start_time = time.time()
-        
+        print("Quantum start")
         try:
             matrix_train = kernel.evaluate(x_vec=X_train)
+            print("Train matrix done")
             matrix_test = kernel.evaluate(x_vec=X_test, y_vec=X_train)
+            print("Test matrix done")
         except ValueError as e:
             print(f"\nCRITICAL ERROR: {e}")
             exit()
             
-        qsvm = SVC(kernel='precomputed')
+        qsvm = SVC(kernel='precomputed', C=params['C'])
         qsvm.fit(matrix_train, y_train)
         
         end_time = time.time()
         
         y_pred = qsvm.predict(matrix_test)
         
-        # Calculate metrics
         score = metrics.accuracy_score(y_test, y_pred)
         f1 = metrics.f1_score(y_test, y_pred, average='weighted')
         
@@ -172,33 +177,58 @@ class ExperimentRunner():
         if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
             for value in experiment_values:
                 if mode == 'feature_complexity':
-                    datasets_dict[value] = SyntheticDataManager(
-                        num_dims=num_dims, 
-                        n_informative=value,
-                    )
+                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, n_informative=value)
                 elif mode == 'margin':
-                    datasets_dict[value] = SyntheticDataManager(
-                        num_dims=num_dims, 
-                        class_sep=value,
-                    )
+                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, class_sep=value)
                 elif mode == 'clusters':
-                    datasets_dict[value] = SyntheticDataManager(
-                        num_dims=num_dims, 
-                        n_clusters_per_class=value,
-                    )
+                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, n_clusters_per_class=value)
                 elif mode == 'noise':
-                    datasets_dict[value] = SyntheticDataManager(
-                        num_dims=num_dims, 
-                        flip_y=value,
-                    )
+                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, flip_y=value)
+
+        print("\n" + "="*80)
+        print(" PHASE 1: HYPERPARAMETER OPTIMIZATION (HOLD-OUT VALIDATION)")
+        print("="*80)
+                
+        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
+            # Use middle value as baseline (e.g., for [1,2,3,4,5], use value=3)
+            baseline_value = experiment_values[len(experiment_values) // 2]
+            tune_dm = datasets_dict[baseline_value]
+            print(f"  Baseline dataset: {mode} = {baseline_value}")
+        else:
+            tune_dm = data_manager
+            print(f"  Baseline dataset: {mode} mode with standard parameters")
+        
+        X_tr_tune, X_val_tune, _, y_tr_tune, y_val_tune, _ = tune_dm.get_data_split(seed=42)
+        print(f"  Tuning Set Extracted -> Train: {len(X_tr_tune)}, Val: {len(X_val_tune)}")
+        
+        # Run the Tuners
+        c_best_params = ClassicalSVMTuner.get_best_params(
+            X_tr_tune, X_val_tune, y_tr_tune, y_val_tune,
+            cache_key=f"classical_{mode}_baseline",
+            verbose=False
+        )
+
+        q_best_params = QuantumSVMTuner.get_best_params(
+            X_tr_tune, X_val_tune, y_tr_tune, y_val_tune, num_dims,
+            cache_key=f"quantum_{mode}_baseline",
+            verbose=False
+        )
+        
+        print("\n  [LOCKED] Classical Parameters:", c_best_params)
+        print("  [LOCKED] Quantum Parameters:", q_best_params)
+        
+        
+        print("\n" + "="*80)
+        print(" PHASE 2: EXPERIMENTAL SWEEP")
+        print("="*80)
         
         for value in experiment_values:
             c_data = {'acc': [], 'f1': [], 'time': []}
             q_data = {'acc': [], 'f1': [], 'time': []}
             
-            print(f"\n{'='*60}")
+            print(f"\n{'='*80}")
             print(f"RUNNING EXPERIMENT: {value_name} = {value}")
-            print(f"{'='*60}")
+            print(f"{'='*80}")
             
             is_kfold = mode in ['feature_complexity', 'margin', 'clusters', 'noise']
             
@@ -207,7 +237,7 @@ class ExperimentRunner():
                 current_dm = datasets_dict[value]
                 
                 def fold_generator():
-                    for idx, splits in enumerate(current_dm.get_kfold_splits(k_folds=num_trials, train_size=fixed_size)):
+                    for idx, splits in enumerate(current_dm.get_kfold_splits(k_folds=num_trials, seed=42)):
                         yield idx, splits
                 
                 data_iterator = fold_generator()
@@ -235,20 +265,20 @@ class ExperimentRunner():
                 
                 data_iterator = sweep_generator()
             
-            for idx, (X_tr, X_val, X_te, y_tr, y_val, y_te) in data_iterator:
+            for idx, (X_tr, _, X_te, y_tr, _, y_te) in data_iterator:
                 
                 label = "Fold" if is_kfold else "Trial"
                 print(f"\n{label} {idx+1}/{num_trials} (Train: {len(X_tr)}, Test: {len(X_te)})...")
                 
                 # Run Classical
-                cache_key = f"{mode}_{value}"
-                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, cache_key=cache_key)
+                cache_key=f"classical_{mode}_baseline"
+                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, params=c_best_params, cache_key=cache_key)
                 c_data['acc'].append(c_score)
                 c_data['f1'].append(c_f1)
                 c_data['time'].append(c_time)
                 
                 # Run Quantum
-                q_score, q_f1, q_time = self.run_quantum(X_tr, X_te, y_tr, y_te, num_dims)
+                q_score, q_f1, q_time = self.run_quantum(X_tr, X_te, y_tr, y_te, num_dims, params=q_best_params)
                 q_data['acc'].append(q_score)
                 q_data['f1'].append(q_f1)
                 q_data['time'].append(q_time)
