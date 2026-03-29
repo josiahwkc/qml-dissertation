@@ -28,7 +28,6 @@ from sklearn import metrics
 
 from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager, TrainingSampler
 from tuner import ClassicalSVMTuner, QuantumSVMTuner
-from classical_tuner import OldClassicalSVMTuner
 
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
@@ -76,6 +75,15 @@ class ExperimentRunner():
             'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
             'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
         }
+      
+    def reset(self):
+        self.results = {
+        'x_values': [],
+        'sizes': [],
+        'q_acc': [], 'q_acc_std': [], 'q_f1': [], 'q_f1_std': [], 'q_time': [],
+        'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
+        'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
+    }
        
     def run_classical(self, X_train, X_test, y_train, y_test, params, cache_key=None):
         """Runs Classical SVM (RBF Kernel) with locked parameters"""
@@ -144,7 +152,10 @@ class ExperimentRunner():
         """
         if experiment_values is None:
             raise ValueError(f"experiment_values must be provided for mode='{mode}'")
-            
+        
+        # Resets and clears stored results
+        self.reset()
+           
         if mode == 'size':
             x_label = 'Training Samples'
             title_suffix = 'vs Training Size'
