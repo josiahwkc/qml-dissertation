@@ -82,9 +82,9 @@ class AdhocDataManager():
     def get_data_split(self, seed):
         """Creates train/val/test split."""
         
-        # Split the training pool into train (95%) and validation (5%)
+        # Split the training pool into train (80%) and validation (20%)
         X_train, X_val, y_train, y_val = train_test_split(
-            self.X_pool, self.y_pool, test_size=0.05, random_state=seed, stratify=self.y_pool
+            self.X_pool, self.y_pool, test_size=0.2, random_state=seed, stratify=self.y_pool
         )
         
         return X_train, X_val, self.X_test_fixed, y_train, y_val, self.y_test_fixed
@@ -229,14 +229,14 @@ class CSVDataManager():
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
-        # Split into pool and test
+        # Split into 80% pool and 20% fixed test
         X_pool, X_test, y_pool, y_test = train_test_split(
             self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
         )
         
-        # Split into train and validation
+        # Split into 80% (of 80%) train and 20% (of 80%) validation
         X_train, X_val, y_train, y_val = train_test_split(
-            X_pool, y_pool, test_size=0.05, random_state=seed, stratify=y_pool
+            X_pool, y_pool, test_size=0.2, random_state=seed, stratify=y_pool
         )
         
         # Preprocessing pipeline
@@ -256,7 +256,11 @@ class CSVDataManager():
 
 class SyntheticDataManager():
     """Generates synthetic data using scikit-learn's make_classification"""
-    def __init__(self, num_dims=4, n_samples=500, n_informative=4, n_classes=2, 
+    def __init__(self):
+        # Dictionary of tuples (X, y)
+        self.datasets_dict = {}
+        
+    def create_dataset(self, label, num_dims=4, n_samples=500, n_informative=4, n_classes=2, 
                  n_clusters_per_class=1, flip_y=0.01, class_sep=1.0, random_state=42):
         """
         Args:
@@ -271,14 +275,14 @@ class SyntheticDataManager():
             class_sep: Margin between data points. Larger values spread out the clusters/classes and make the classification task easier.
             random_state: Random seed
         """
+        
         if n_informative > num_dims:
             raise ValueError(
                 f"n_informative ({n_informative}) cannot exceed num_dims ({num_dims}). "
                 f"Set n_informative <= {num_dims}."
-            )
-            
+        )
         # Generate the synthetic dataset
-        self.X, self.y = datasets.make_classification(
+        X, y = datasets.make_classification(
             n_samples=n_samples,
             n_features=num_dims,
             n_informative=n_informative,
@@ -291,6 +295,9 @@ class SyntheticDataManager():
             random_state=random_state
         )
         
+        # Save generated dataset as tuple into dictionary
+        self.datasets_dict[label] = (X, y)
+     
     def get_kfold_splits(self, seed, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
@@ -327,14 +334,14 @@ class SyntheticDataManager():
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
-        # Split into pool and test
+        # Split into 80% pool and 20% fixed test
         X_pool, X_test, y_pool, y_test = train_test_split(
             self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
         )
         
-        # Split into train and validation
+        # Split into 80% (of 80%) train and 20% (of 80%) validation
         X_train, X_val, y_train, y_val = train_test_split(
-            X_pool, y_pool, test_size=0.05, random_state=seed, stratify=y_pool
+            X_pool, y_pool, test_size=0.2, random_state=seed, stratify=y_pool
         )
         
         # Preprocessing
