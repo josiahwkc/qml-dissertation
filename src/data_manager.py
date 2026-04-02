@@ -60,7 +60,7 @@ class TrainingSampler():
 
 class AdhocDataManager():
     """Generates synthetic data using Qiskit's ad_hoc_data"""
-    def __init__(self, num_dims=2, gap=0.3):
+    def __init__(self, num_dims, gap=0.3):
         self.num_dims = num_dims
                 
         # Generate fixed pools
@@ -92,7 +92,7 @@ class AdhocDataManager():
 
 class CSVDataManager():
     """Manages arbitrary CSV datasets with automatic preprocessing"""
-    def __init__(self, filename, target_col, num_dims=4, n_class=None, 
+    def __init__(self, filename, target_col, num_dims, n_class=None, 
                  categorical_cols=None, drop_cols=None, max_samples=1000):
         """
         Args:
@@ -191,7 +191,7 @@ class CSVDataManager():
         if self.X.shape[1] < num_dims:
             print(f"Warning: Only {self.X.shape[1]} features available, reducing num_dims to {self.X.shape[1]}")
             self.num_dims = self.X.shape[1]
-            
+    
     def get_kfold_splits(self, seed, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
@@ -260,7 +260,28 @@ class SyntheticDataManager():
         # Dictionary of tuples (X, y)
         self.datasets_dict = {}
         
-    def create_dataset(self, label, num_dims=4, n_samples=500, n_informative=4, n_classes=2, 
+    def initialise_dict(self, num_dims, mode, experiment_values, random_state=42):
+        mode_config = {
+            'feature_complexity': lambda val: {'n_informative': val},
+            'margin': lambda val: {'class_sep': val},
+            'clusters': lambda val: {'n_clusters_per_class': val},
+            'noise': lambda val: {'flip_y': val}
+        }
+        
+        if mode not in mode_config:
+            raise ValueError(f"Mode '{mode}' not supported for synthetic datasets")
+        
+        for value in experiment_values:
+            params = mode_config[mode](value)
+            
+            self.create_dataset(
+                label=f"{mode}_{value}",
+                num_dims=num_dims,
+                random_state=random_state,
+                **params
+            )
+        
+    def create_dataset(self, label, num_dims, n_samples=500, n_informative=4, n_classes=2, 
                  n_clusters_per_class=1, flip_y=0.01, class_sep=1.0, random_state=42):
         """
         Args:
@@ -332,11 +353,13 @@ class SyntheticDataManager():
             # Yield the fold to the experiment runner
             yield X_train_processed, X_val_processed, X_test_processed, y_train_raw, y_val, y_test
             
-    def get_data_split(self, seed):
+    def get_data_split(self, seed, label):
         """Create train/test/validation split with preprocessing"""
         # Split into 80% pool and 20% fixed test
+        X, y = self.datasets_dict[label]
+        
         X_pool, X_test, y_pool, y_test = train_test_split(
-            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
+            X, y, test_size=0.2, random_state=seed, stratify=self.y
         )
         
         # Split into 80% (of 80%) train and 20% (of 80%) validation
