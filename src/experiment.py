@@ -190,13 +190,10 @@ class ExperimentRunner():
             # Use middle value as baseline (e.g., for [1,2,3,4,5], use value=3)
             baseline_value = experiment_values[len(experiment_values) // 2]
             tune_dm = datasets_dict[baseline_value]
-            print(f"  Baseline dataset: {mode} = {baseline_value}")
         else:
             tune_dm = data_manager
-            print(f"  Baseline dataset: {mode} mode with standard parameters")
         
         X_tr_tune, X_val_tune, _, y_tr_tune, y_val_tune, _ = tune_dm.get_data_split(seed=42)
-        print(f"  Tuning Set Extracted -> Train: {len(X_tr_tune)}, Val: {len(X_val_tune)}")
         
         # Run the Tuners
         c_best_params = ClassicalSVMTuner.get_best_params(
