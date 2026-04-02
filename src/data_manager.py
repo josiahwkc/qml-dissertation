@@ -92,7 +92,11 @@ class AdhocDataManager():
 
 class CSVDataManager():
     """Manages arbitrary CSV datasets with automatic preprocessing"""
-    def __init__(self, filename, target_col, num_dims, n_class=None, 
+    def __init__(self):
+        self.X = None
+        self.y = None
+    
+    def load_dataset(self, filename, target_col, num_dims, n_class=None, 
                  categorical_cols=None, drop_cols=None, max_samples=1000):
         """
         Args:
