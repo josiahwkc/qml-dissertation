@@ -32,6 +32,7 @@ from tuner import ClassicalSVMTuner, QuantumSVMTuner
 # Quantum Imports
 from qiskit.circuit.library import ZZFeatureMap
 from qiskit_machine_learning.kernels import FidelityQuantumKernel
+from feature_map_factory import FeatureMapFactory
 
 # %%
 # Experiment Class
@@ -67,52 +68,37 @@ def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
     return p_val
 
 class ExperimentRunner():
-    def __init__(self):
-        self.results = {
-            'x_values': [],
-            'sizes': [],
-            'q_acc': [], 'q_acc_std': [],  'q_f1': [], 'q_f1_std': [], 'q_time': [],
-            'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
-            'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
-        }
+    def __init__(self, quantum_provider):
+        self.qp = quantum_provider
+        self.classical_clf = SVC(kernel='rbf')
+        self.reset()
       
     def reset(self):
         self.results = {
-        'x_values': [],
-        'sizes': [],
-        'q_acc': [], 'q_acc_std': [], 'q_f1': [], 'q_f1_std': [], 'q_time': [],
-        'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
-        'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
-    }
+            'x_values': [],
+            'sizes': [],
+            'q_acc': [], 'q_acc_std': [], 'q_f1': [], 'q_f1_std': [], 'q_time': [],
+            'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
+            'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
+        }
        
-    def run_classical(self, X_train, X_test, y_train, y_test, params, cache_key=None):
-        """Runs Classical SVM (RBF Kernel) with locked parameters"""
-        # best_params = OldClassicalSVMTuner.get_best_params(X_train, y_train, cache_key)
-        
-        clf = SVC(kernel='rbf', **params)
+    def run_classical(self, X_train, X_test, y_train, y_test, params):
+        """Runs Classical SVM (RBF Kernel) with locked parameters"""        
+        self.classical_clf.set_params(**params)
     
         start_time = time.time()
-        clf.fit(X_train, y_train)
+        self.classical_clf.fit(X_train, y_train)
         end_time = time.time()
         
-        y_pred = clf.predict(X_test)
+        y_pred = self.classical_clf.predict(X_test)
         
         score = metrics.accuracy_score(y_test, y_pred)
         f1 = metrics.f1_score(y_test, y_pred, average='weighted')
         
         return score, f1, (end_time - start_time)
     
-    def run_quantum(self, X_train, X_test, y_train, y_test, num_dims, params):
-        """Runs Quantum SVM with locked parameters"""
-        
-        feature_map = ZZFeatureMap(
-            feature_dimension=num_dims, 
-            reps=params['reps'], 
-            entanglement=params['entanglement']
-        )
-
-        kernel = FidelityQuantumKernel(feature_map=feature_map)
-                
+    def run_quantum(self, X_train, X_test, y_train, y_test, kernel, params):
+        """Runs Quantum SVM with locked parameters"""        
         start_time = time.time()
         print("Quantum start")
         try:
@@ -233,6 +219,18 @@ class ExperimentRunner():
         print(" PHASE 2: EXPERIMENTAL SWEEP")
         print("="*80)
         
+        # 1. Build the Feature Map ONCE for the locked hyperparameters
+        # We use the Factory to handle transpilation for the Aer backend
+        optimized_fm = FeatureMapFactory.build_zz_map(
+            num_dims=num_dims, 
+            reps=q_best_params['reps'], 
+            entanglement=q_best_params['entanglement'],
+            backend=self.qp.backend
+        )
+
+        # 2. Initialize the Kernel ONCE using the Full Stack (Sampler + Fidelity)
+        shared_kernel = self.qp.get_kernel(optimized_fm)
+        
         for value in experiment_values:
             c_data = {'acc': [], 'f1': [], 'time': []}
             q_data = {'acc': [], 'f1': [], 'time': []}
@@ -283,13 +281,13 @@ class ExperimentRunner():
                 
                 # Run Classical
                 cache_key=f"classical_{mode}_baseline"
-                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, params=c_best_params, cache_key=cache_key)
+                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, params=c_best_params)
                 c_data['acc'].append(c_score)
                 c_data['f1'].append(c_f1)
                 c_data['time'].append(c_time)
                 
                 # Run Quantum
-                q_score, q_f1, q_time = self.run_quantum(X_tr, X_te, y_tr, y_te, num_dims, params=q_best_params)
+                q_score, q_f1, q_time = self.run_quantum(X_tr, X_te, y_tr, y_te, kernel=shared_kernel, params=q_best_params)
                 q_data['acc'].append(q_score)
                 q_data['f1'].append(q_f1)
                 q_data['time'].append(q_time)
