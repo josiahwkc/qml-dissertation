@@ -12,6 +12,8 @@ Description:
 # EXECUTE
 from experiment import ExperimentRunner
 from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager
+from quantum_infrastructure import QuantumProvider
+from feature_map_factory import FeatureMapFactory
 
 
 # Configs
@@ -26,8 +28,10 @@ EXPERIMENT_MODE = input()
 
 
 def main():
+    provider = QuantumProvider()
+    runner = ExperimentRunner(quantum_provider=provider)
+    
     print(f"Initialising Experiment Runner in '{EXPERIMENT_MODE}' mode...")
-    runner = ExperimentRunner()
 
     if EXPERIMENT_MODE == 'size':
         csv = CSVDataManager(filename="mnist_train.csv", target_col="label", num_dims=NUM_DIMS, n_class=N_CLASS)
