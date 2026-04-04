@@ -12,8 +12,6 @@ Description:
 # EXECUTE
 from experiment import ExperimentRunner
 from quantum_infrastructure import QuantumProvider
-from feature_map_factory import FeatureMapFactory
-
 
 # Configs
 NUM_DIMS = 5          # Number of PCA dimensions (and Qubits)
@@ -30,91 +28,40 @@ SWEEP_VALUES_DICT = {
     'noise': [0.0, 0.05, 0.10, 0.15, 0.20]
 }
 
-print("Choose an experiment mode:")
-print("['size', 'imbalance', 'feature_complexity', 'margin', 'clusters', or 'noise']\n")
-EXPERIMENT_MODE = input()
-
 
 def main():
-    provider = QuantumProvider()
-    runner = ExperimentRunner(quantum_provider=provider, sweep_values_dict=SWEEP_VALUES_DICT)
+    print("Choose an experiment mode:")
+    print("['size', 'imbalance', 'feature_complexity', 'margin', 'clusters', or 'noise']\n")
+    experiment_mode = input()
     
-    print(f"Initialising Experiment Runner in '{EXPERIMENT_MODE}' mode...")
+    provider = QuantumProvider()
+    runner = ExperimentRunner(quantum_provider=provider, sweep_values_dict=SWEEP_VALUES_DICT, num_dims=NUM_DIMS)
+    
+    print(f"Initialising Experiment Runner in '{experiment_mode}' mode...")
 
-    if EXPERIMENT_MODE == 'size':
-        runner.initialise_datasets(
-            num_dims=NUM_DIMS, 
-            mode='size',
-            filename='fashion-mnist_train.csv',
-            target_col='label'
-        )
-        runner.run_experiment(
-            mode='size',
-            num_dims=NUM_DIMS, 
-            num_trials=NUM_TRIALS
-        )
+    if experiment_mode == 'size':
+        runner.initialise_datasets(mode='size', filename='fashion-mnist_train.csv', target_col='label')
+        runner.run_experiment(mode='size', num_trials=NUM_TRIALS)
         
-    elif EXPERIMENT_MODE == 'imbalance':
-        runner.initialise_datasets(
-            num_dims=NUM_DIMS,
-            mode='imbalance',
-            filename='breast-cancer.csv',
-            target_col='diagnosis'
-        )
-        runner.run_experiment(
-            mode='imbalance', 
-            num_dims=NUM_DIMS, 
-            num_trials=NUM_TRIALS, 
-            fixed_size=FIXED_SIZE
-        )
+    elif experiment_mode == 'imbalance':
+        runner.initialise_datasets(mode='imbalance', filename='breast-cancer.csv', target_col='diagnosis')
+        runner.run_experiment(mode='imbalance', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
         
-    elif EXPERIMENT_MODE == 'feature_complexity':
-        runner.initialise_datasets(
-            num_dims=NUM_DIMS,
-            mode='feature_complexity',
-        )
-        runner.run_experiment(
-            mode='feature_complexity', 
-            num_dims=NUM_DIMS, 
-            num_trials=NUM_TRIALS, 
-            fixed_size=FIXED_SIZE
-        )
+    elif experiment_mode == 'feature_complexity':
+        runner.initialise_datasets(mode='feature_complexity')
+        runner.run_experiment(mode='feature_complexity', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
         
-    elif EXPERIMENT_MODE == 'margin':
-        runner.initialise_datasets(
-            num_dims=NUM_DIMS,
-            mode='margin',
-        )
-        runner.run_experiment(
-            mode='margin', 
-            num_dims=NUM_DIMS, 
-            num_trials=NUM_TRIALS, 
-            fixed_size=FIXED_SIZE
-        )
+    elif experiment_mode == 'margin':
+        runner.initialise_datasets(mode='margin')
+        runner.run_experiment(mode='margin', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
         
-    elif EXPERIMENT_MODE == 'clusters':
-        runner.initialise_datasets(
-            num_dims=NUM_DIMS,
-            mode='clusters',
-        )
-        runner.run_experiment(
-            mode='clusters', 
-            num_dims=NUM_DIMS, 
-            num_trials=NUM_TRIALS, 
-            fixed_size=FIXED_SIZE
-        )
+    elif experiment_mode == 'clusters':
+        runner.initialise_datasets(mode='clusters')
+        runner.run_experiment(mode='clusters', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
         
-    elif EXPERIMENT_MODE == 'noise':
-        runner.initialise_datasets(
-            num_dims=NUM_DIMS,
-            mode='noise',
-        )
-        runner.run_experiment(
-            mode='noise', 
-            num_dims=NUM_DIMS, 
-            num_trials=NUM_TRIALS, 
-            fixed_size=FIXED_SIZE
-        )
+    elif experiment_mode == 'noise':
+        runner.initialise_datasets(mode='noise')
+        runner.run_experiment(mode='noise', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
      
 if __name__ == "__main__":
     main()

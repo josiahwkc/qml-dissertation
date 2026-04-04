@@ -68,26 +68,27 @@ def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
     return p_val
 
 class ExperimentRunner():
-    def __init__(self, quantum_provider, sweep_values_dict):
+    def __init__(self, quantum_provider, sweep_values_dict, num_dims):
         self.qp = quantum_provider
         self.classical_clf = SVC(kernel='rbf')
         
-        self.reset()
+        self.clear_results()
         self.sweep_values_dict = sweep_values_dict
+        self.num_dims = num_dims
     
-    def initialise_datasets(self, num_dims, mode=None, filename=None, target_col=None):
+    def initialise_datasets(self, mode=None, filename=None, target_col=None):
         if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
             self.data_manager = SyntheticDataManager()
-            self.data_manager.initialise_datasets(num_dims=num_dims, mode=mode, experiment_values=self.sweep_values_dict[mode])
+            self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, experiment_values=self.sweep_values_dict[mode])
         
         elif mode in ['size', 'imbalance']:
             self.data_manager = CSVDataManager()
-            self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=num_dims)
+            self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=self.num_dims)
         
         else:
             raise ValueError(f"Invalid mode: {mode}")
     
-    def reset(self):
+    def clear_results(self):
         self.results = {
             'x_values': [],
             'sizes': [],
@@ -136,7 +137,7 @@ class ExperimentRunner():
         
         return score, f1, (end_time - start_time)
     
-    def run_experiment(self, mode, num_dims, num_trials, fixed_size=100):
+    def run_experiment(self, mode, num_trials, fixed_size=100):
         """
         Main experiment runner
         
@@ -150,7 +151,7 @@ class ExperimentRunner():
             fixed_size: Training size when mode='imbalance'
         """
         # Resets and clears stored results
-        self.reset()
+        self.clear_results()
            
         if mode == 'size':
             x_label = 'Training Samples'
@@ -204,7 +205,7 @@ class ExperimentRunner():
         )
 
         q_best_params = QuantumSVMTuner.get_best_params(
-            X_tr_tune, X_val_tune, y_tr_tune, y_val_tune, num_dims,
+            X_tr_tune, X_val_tune, y_tr_tune, y_val_tune, self.num_dims,
             cache_key=f"quantum_{mode}_baseline",
             verbose=False
         )
@@ -218,9 +219,9 @@ class ExperimentRunner():
         print("="*80)
         
         # 1. Build the Feature Map ONCE for the locked hyperparameters
-        # We use the Factory to handle transpilation for the Aer backend
+        # # We use the Factory to handle transpilation for the Aer backend
         optimized_fm = FeatureMapFactory.build_zz_map(
-            num_dims=num_dims, 
+            num_dims=self.num_dims, 
             reps=q_best_params['reps'], 
             entanglement=q_best_params['entanglement'],
             backend=self.qp.backend
@@ -278,7 +279,6 @@ class ExperimentRunner():
                 print(f"\n{label} {idx+1}/{num_trials} (Train: {len(X_tr)}, Test: {len(X_te)})...")
                 
                 # Run Classical
-                cache_key=f"classical_{mode}_baseline"
                 c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, params=c_best_params)
                 c_data['acc'].append(c_score)
                 c_data['f1'].append(c_f1)
