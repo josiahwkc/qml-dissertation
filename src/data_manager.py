@@ -323,13 +323,15 @@ class SyntheticDataManager():
         # Save generated dataset as tuple into dictionary
         self.datasets_dict[label] = (X, y)
      
-    def get_kfold_splits(self, seed, k_folds=5):
+    def get_kfold_splits(self, seed, label, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
         """
+        X, y = self.datasets_dict[label]
+        
         # Split into pool and test
         X_pool, X_test, y_pool, y_test = train_test_split(
-            self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
+            X, y, test_size=0.2, random_state=seed, stratify=y
         )
         
         skf = StratifiedKFold(n_splits=k_folds, shuffle=True, random_state=seed)
@@ -363,7 +365,7 @@ class SyntheticDataManager():
         X, y = self.datasets_dict[label]
         
         X_pool, X_test, y_pool, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=seed, stratify=self.y
+            X, y, test_size=0.2, random_state=seed, stratify=y
         )
         
         # Split into 80% (of 80%) train and 20% (of 80%) validation
