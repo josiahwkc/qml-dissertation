@@ -96,7 +96,7 @@ class CSVDataManager():
         self.X = None
         self.y = None
     
-    def load_dataset(self, filename, target_col, num_dims, n_class=None, 
+    def load_dataset(self, filename, target_col, num_dims, n_class=2, 
                  categorical_cols=None, drop_cols=None, max_samples=1000):
         """
         Args:
@@ -264,48 +264,36 @@ class SyntheticDataManager():
         # Dictionary of tuples (X, y)
         self.datasets_dict = {}
         
-    def initialise_dict(self, num_dims, mode, experiment_values, random_state=42):
-        mode_config = {
-            'feature_complexity': lambda val: {'n_informative': val},
-            'margin': lambda val: {'class_sep': val},
-            'clusters': lambda val: {'n_clusters_per_class': val},
-            'noise': lambda val: {'flip_y': val}
-        }
-        
-        if mode not in mode_config:
-            raise ValueError(f"Mode '{mode}' not supported for synthetic datasets")
-        
-        for value in experiment_values:
-            params = mode_config[mode](value)
-            
-            self.create_dataset(
-                label=f"{mode}_{value}",
-                num_dims=num_dims,
-                random_state=random_state,
-                **params
-            )
-        
-    def create_dataset(self, label, num_dims, n_samples=500, n_informative=4, n_classes=2, 
-                 n_clusters_per_class=1, flip_y=0.01, class_sep=1.0, random_state=42):
+    def create_dataset(self, label, num_dims, n_samples=500, n_informative=4, 
+                      n_classes=2, n_clusters_per_class=1, flip_y=0.01, 
+                      class_sep=1.0, random_state=42):
         """
+        Create and store a single synthetic dataset.
+        
         Args:
-            num_dims: Number of PCA components (qubits)
-            n_samples: Total samples
-            n_features: Raw features before PCA
+            label: Unique identifier for this dataset
+            num_dims: Number of features (dimensionality)
+            n_samples: Total number of samples to generate
             n_informative: Number of informative features
-            n_redundant: Number of redundant features
             n_classes: Number of classes
             n_clusters_per_class: Number of clusters per class
-            flip_y: Fraction of samples whose class is assigned randomly
-            class_sep: Margin between data points. Larger values spread out the clusters/classes and make the classification task easier.
-            random_state: Random seed
-        """
+            flip_y: Fraction of samples whose class is randomly flipped (noise)
+            class_sep: Class separation factor (larger = easier classification)
+            random_state: Random seed for reproducibility
         
+        Returns:
+            tuple: (X, y) arrays that were generated
+        """
+        # Validation
         if n_informative > num_dims:
             raise ValueError(
                 f"n_informative ({n_informative}) cannot exceed num_dims ({num_dims}). "
                 f"Set n_informative <= {num_dims}."
-        )
+            )
+        
+        if label in self.datasets_dict:
+            print(f"Warning: Dataset '{label}' already exists. Overwriting...")
+        
         # Generate the synthetic dataset
         X, y = datasets.make_classification(
             n_samples=n_samples,
@@ -320,8 +308,60 @@ class SyntheticDataManager():
             random_state=random_state
         )
         
-        # Save generated dataset as tuple into dictionary
+        # Store in dictionary
         self.datasets_dict[label] = (X, y)
+        
+        return X, y
+    
+    def initialise_datasets(self, mode, num_dims, experiment_values, 
+                           n_classes=2, n_samples=500, random_state=42):
+        """
+        Pre-generate multiple datasets for an experiment mode.
+        
+        Args:
+            mode: Experiment mode ('feature_complexity', 'margin', 'clusters', 'noise')
+            num_dims: Number of features
+            experiment_values: List of parameter values to test
+            n_classes: Number of classes (default: 2 for binary classification)
+            n_samples: Number of samples per dataset
+            random_state: Random seed
+        
+        Returns:
+            dict: {label: (X, y)} mapping of generated datasets
+        """
+        # Map mode to parameter name
+        mode_config = {
+            'feature_complexity': 'n_informative',
+            'margin': 'class_sep',
+            'clusters': 'n_clusters_per_class',
+            'noise': 'flip_y'
+        }
+        
+        if mode not in mode_config:
+            raise ValueError(
+                f"Mode '{mode}' not supported. "
+                f"Available modes: {list(mode_config.keys())}"
+            )
+        
+        param_name = mode_config[mode]
+                
+        # Generate dataset for each experiment value
+        for value in experiment_values:
+            label = f"{mode}_{value}"
+            
+            # Build parameter dict with varying parameter
+            params = {
+                'label': label,
+                'num_dims': num_dims,
+                'n_samples': n_samples,
+                'n_classes': n_classes,
+                'random_state': random_state,
+                param_name: value  # This is the varying parameter
+            }
+            
+            self.create_dataset(**params)
+        
+        return self.datasets_dict
      
     def get_kfold_splits(self, seed, label, k_folds=5):
         """
