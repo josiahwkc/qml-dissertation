@@ -35,33 +35,28 @@ def main():
     experiment_mode = input()
     
     provider = QuantumProvider()
-    runner = ExperimentRunner(quantum_provider=provider, sweep_values_dict=SWEEP_VALUES_DICT, num_dims=NUM_DIMS)
+    runner = ExperimentRunner(
+        quantum_provider=provider, 
+        sweep_values_dict=SWEEP_VALUES_DICT, 
+        num_dims=NUM_DIMS,
+        num_trials=NUM_TRIALS,
+        fixed_size=FIXED_SIZE
+    )
     
     print(f"Initialising Experiment Runner in '{experiment_mode}' mode...")
 
     if experiment_mode == 'size':
         runner.initialise_datasets(mode='size', filename='fashion-mnist_train.csv', target_col='label')
-        runner.run_experiment(mode='size', num_trials=NUM_TRIALS)
+        runner.run_experiment(mode='size')
         
     elif experiment_mode == 'imbalance':
         runner.initialise_datasets(mode='imbalance', filename='breast-cancer.csv', target_col='diagnosis')
-        runner.run_experiment(mode='imbalance', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
-        
-    elif experiment_mode == 'feature_complexity':
-        runner.initialise_datasets(mode='feature_complexity')
-        runner.run_experiment(mode='feature_complexity', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
-        
-    elif experiment_mode == 'margin':
-        runner.initialise_datasets(mode='margin')
-        runner.run_experiment(mode='margin', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
-        
-    elif experiment_mode == 'clusters':
-        runner.initialise_datasets(mode='clusters')
-        runner.run_experiment(mode='clusters', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
-        
-    elif experiment_mode == 'noise':
-        runner.initialise_datasets(mode='noise')
-        runner.run_experiment(mode='noise', num_trials=NUM_TRIALS, fixed_size=FIXED_SIZE)
+        runner.run_experiment(mode='imbalance')
+    
+    # Perform experiment on synthetic datasets
+    else:
+        runner.initialise_datasets(mode=experiment_mode)
+        runner.run_experiment(mode=experiment_mode)
      
 if __name__ == "__main__":
     main()
