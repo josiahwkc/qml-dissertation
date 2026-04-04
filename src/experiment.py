@@ -68,11 +68,25 @@ def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
     return p_val
 
 class ExperimentRunner():
-    def __init__(self, quantum_provider):
+    def __init__(self, quantum_provider, sweep_values_dict):
         self.qp = quantum_provider
         self.classical_clf = SVC(kernel='rbf')
+        
         self.reset()
-      
+        self.sweep_values_dict = sweep_values_dict
+    
+    def initialise_datasets(self, num_dims, mode=None, filename=None, target_col=None):
+        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
+            self.data_manager = SyntheticDataManager()
+            self.data_manager.initialise_datasets(num_dims=num_dims, mode=mode, experiment_values=self.sweep_values_dict[mode])
+        
+        elif mode in ['size', 'imbalance']:
+            self.data_manager = CSVDataManager()
+            self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=num_dims)
+        
+        else:
+            raise ValueError(f"Invalid mode: {mode}")
+    
     def reset(self):
         self.results = {
             'x_values': [],
@@ -122,8 +136,7 @@ class ExperimentRunner():
         
         return score, f1, (end_time - start_time)
     
-    def run_experiment(self, mode, data_manager, num_dims, num_trials, 
-                    experiment_values=None, fixed_size=100):
+    def run_experiment(self, mode, num_dims, num_trials, fixed_size=100):
         """
         Main experiment runner
         
@@ -136,9 +149,6 @@ class ExperimentRunner():
             imbalance_ratios: List of ratios (required if mode='imbalance')
             fixed_size: Training size when mode='imbalance'
         """
-        if experiment_values is None:
-            raise ValueError(f"experiment_values must be provided for mode='{mode}'")
-        
         # Resets and clears stored results
         self.reset()
            
@@ -168,30 +178,21 @@ class ExperimentRunner():
             value_name = 'Noise Fraction'
         else:
             raise ValueError(f"Invalid mode: {mode}")
-        
-        # PRE-GENERATE datasets for synthetic modes
-        datasets_dict = {}
-        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
-            for value in experiment_values:
-                if mode == 'feature_complexity':
-                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, n_informative=value)
-                elif mode == 'margin':
-                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, class_sep=value)
-                elif mode == 'clusters':
-                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, n_clusters_per_class=value)
-                elif mode == 'noise':
-                    datasets_dict[value] = SyntheticDataManager(num_dims=num_dims, flip_y=value)
 
         print("\n" + "="*80)
         print(" PHASE 1: HYPERPARAMETER OPTIMIZATION (HOLD-OUT VALIDATION)")
         print("="*80)
+        
+        sweep_values = self.sweep_values_dict[mode]
                 
         if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
             # Use middle value as baseline (e.g., for [1,2,3,4,5], use value=3)
-            baseline_value = experiment_values[len(experiment_values) // 2]
-            tune_dm = datasets_dict[baseline_value]
+            baseline_value = sweep_values[len(sweep_values) // 2]
+            datasets_dict = self.data_manager
+            label = f"{mode}_{baseline_value}"
+            tune_dm = datasets_dict[label]
         else:
-            tune_dm = data_manager
+            tune_dm = self.data_manager
         
         X_tr_tune, X_val_tune, _, y_tr_tune, y_val_tune, _ = tune_dm.get_data_split(seed=42)
         
@@ -228,7 +229,7 @@ class ExperimentRunner():
         # 2. Initialize the Kernel ONCE using the Full Stack (Sampler + Fidelity)
         shared_kernel = self.qp.get_kernel(optimized_fm)
         
-        for value in experiment_values:
+        for value in sweep_values:
             c_data = {'acc': [], 'f1': [], 'time': []}
             q_data = {'acc': [], 'f1': [], 'time': []}
             
@@ -250,7 +251,7 @@ class ExperimentRunner():
                 
             else:
                 print(f"Executing Monte Carlo Random Sub-Sampling ({num_trials} trials)...")
-                current_dm = data_manager
+                current_dm = self.data_manager
                 
                 def sweep_generator():
                     for trial in range(num_trials):
