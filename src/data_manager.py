@@ -313,7 +313,7 @@ class SyntheticDataManager():
         
         return X, y
     
-    def initialise_datasets(self, mode, num_dims, experiment_values, 
+    def initialise_datasets(self, mode, num_dims, sweep_values, 
                            n_classes=2, n_samples=500, random_state=42):
         """
         Pre-generate multiple datasets for an experiment mode.
@@ -321,7 +321,7 @@ class SyntheticDataManager():
         Args:
             mode: Experiment mode ('feature_complexity', 'margin', 'clusters', 'noise')
             num_dims: Number of features
-            experiment_values: List of parameter values to test
+            sweep_values: List of parameter values to test
             n_classes: Number of classes (default: 2 for binary classification)
             n_samples: Number of samples per dataset
             random_state: Random seed
@@ -346,7 +346,7 @@ class SyntheticDataManager():
         param_name = mode_config[mode]
                 
         # Generate dataset for each experiment value
-        for value in experiment_values:
+        for value in sweep_values:
             label = f"{mode}_{value}"
             
             # Build parameter dict with varying parameter
