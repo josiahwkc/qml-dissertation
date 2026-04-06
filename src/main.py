@@ -24,7 +24,7 @@ SWEEP_VALUES_DICT = {
     'imbalance': [0.5, 0.6, 0.7, 0.8, 0.9],
     'feature_complexity': [1, 2, 3, 4, 5],
     'margin': [0.1, 0.5, 1.0, 1.5, 2.0],
-    'custers': [1, 2, 3, 4],
+    'clusters': [1, 2, 3, 4],
     'noise': [0.0, 0.05, 0.10, 0.15, 0.20]
 }
 
