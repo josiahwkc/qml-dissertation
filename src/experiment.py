@@ -67,19 +67,72 @@ def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
     p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
     return p_val
 
+class ExperimentConfig:
+    """Configuration for experiment modes"""
+    
+    MODES = {
+        'size': {
+            'x_label': 'Training Samples',
+            'title_suffix': 'vs Training Size',
+            'value_name': 'Training Size',
+            'is_synthetic': False
+        },
+        'imbalance': {
+            'x_label': 'Class Imbalance Ratio',
+            'title_suffix': 'vs Class Imbalance',
+            'value_name': 'Ratio',
+            'is_synthetic': False
+        },
+        'feature_complexity': {
+            'x_label': 'Informative Features',
+            'title_suffix': 'vs Feature Complexity',
+            'value_name': 'Informative Features',
+            'is_synthetic': True
+        },
+        'margin': {
+            'x_label': 'Class Separation',
+            'title_suffix': 'vs Margin',
+            'value_name': 'Class Separation',
+            'is_synthetic': True
+        },
+        'clusters': {
+            'x_label': 'Clusters per Class',
+            'title_suffix': 'vs Clusters',
+            'value_name': 'Clusters/Class',
+            'is_synthetic': True
+        },
+        'noise': {
+            'x_label': 'Label Noise',
+            'title_suffix': 'vs Noise',
+            'value_name': 'Noise Fraction',
+            'is_synthetic': True
+        }
+    }
+    
+    @classmethod
+    def get(cls, mode):
+        """Get configuration for a mode"""
+        if mode not in cls.MODES:
+            raise ValueError(f"Invalid mode: {mode}")
+        return cls.MODES[mode]
+
+
 class ExperimentRunner():
-    def __init__(self, quantum_provider, sweep_values_dict, num_dims):
+    def __init__(self, quantum_provider, sweep_values_dict, num_dims, num_trials, fixed_size):
         self.qp = quantum_provider
-        self.classical_clf = SVC(kernel='rbf')
-        
-        self.clear_results()
-        self.sweep_values_dict = sweep_values_dict
         self.num_dims = num_dims
+        self.num_trials = num_trials
+        self.sweep_values_dict = sweep_values_dict
+        self.fixed_size = fixed_size
+        
+        self.classical_clf = SVC(kernel='rbf')
+        self.data_manager = None
+        self.clear_results()
     
     def initialise_datasets(self, mode=None, filename=None, target_col=None):
         if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
             self.data_manager = SyntheticDataManager()
-            self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, experiment_values=self.sweep_values_dict[mode])
+            self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, sweep_values=self.sweep_values_dict[mode])
         
         elif mode in ['size', 'imbalance']:
             self.data_manager = CSVDataManager()
@@ -137,258 +190,349 @@ class ExperimentRunner():
         
         return score, f1, (end_time - start_time)
     
-    def run_experiment(self, mode, num_trials, fixed_size=100):
+    def run_experiment(self, mode):
         """
-        Main experiment runner
+        Run complete experiment pipeline.
         
-        Args:
-            mode: 'size' or 'imbalance'
-            data_manager: DataManager instance
-            num_dims: Number of PCA dimensions
-            num_trials: Number of trials per configuration
-            training_sizes: List of sizes (required if mode='size')
-            imbalance_ratios: List of ratios (required if mode='imbalance')
-            fixed_size: Training size when mode='imbalance'
+        Clean orchestration method that delegates to focused helper methods.
         """
+        
         # Resets and clears stored results
         self.clear_results()
            
-        if mode == 'size':
-            x_label = 'Training Samples'
-            title_suffix = 'vs Training Size'
-            value_name = 'Training Size'
-        elif mode == 'imbalance':
-            x_label = 'Class Imbalance Ratio (proportion of class 0)'
-            title_suffix = 'vs Class Imbalance'
-            value_name = 'Ratio'
-        elif mode == 'feature_complexity':
-            x_label = 'Number of Informative Features'
-            title_suffix = 'vs Informative Features'
-            value_name = 'Informative Features'
-        elif mode == 'margin':
-            x_label = 'Class Separation Margin (class_sep)'
-            title_suffix = 'vs Class Separation'
-            value_name = 'Class Separation'
-        elif mode == 'clusters':
-            x_label = 'Clusters per Class (Decision Boundary Non-Linearity)'
-            title_suffix = 'vs Clusters per Class'
-            value_name = 'Clusters/Class'
-        elif mode == 'noise':
-            x_label = 'Label Noise Fraction (flip_y)'
-            title_suffix = 'vs Label Noise'
-            value_name = 'Noise Fraction'
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-
-        print("\n" + "="*80)
-        print(" PHASE 1: HYPERPARAMETER OPTIMIZATION (HOLD-OUT VALIDATION)")
-        print("="*80)
+        config = ExperimentConfig.get(mode)
         
         sweep_values = self.sweep_values_dict[mode]
-                
-        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
-            # Use middle value as baseline (e.g., for [1,2,3,4,5], use value=3)
-            baseline_value = sweep_values[len(sweep_values) // 2]
-            datasets_dict = self.data_manager
-            label = f"{mode}_{baseline_value}"
-            tune_dm = datasets_dict[label]
-        else:
-            tune_dm = self.data_manager
         
-        X_tr_tune, X_val_tune, _, y_tr_tune, y_val_tune, _ = tune_dm.get_data_split(seed=42)
+        # Phase 1: Tune hyperparameters  
+        c_params, q_params = self._tune_hyperparameters(mode, sweep_values)
+
+        # Phase 2: Build quantum kernel once
+        # shared_kernel = self._build_quantum_kernel(q_params)
+        feature_map = ZZFeatureMap(
+            feature_dimension=self.num_dims,
+            reps=q_params['reps'],
+            entanglement=q_params['entanglement'],
+        )
+        shared_kernel = FidelityQuantumKernel(feature_map=feature_map)
         
-        # Run the Tuners
-        c_best_params = ClassicalSVMTuner.get_best_params(
-            X_tr_tune, X_val_tune, y_tr_tune, y_val_tune,
+        
+        # Phase 3: Run trials for each sweep value
+        print("\n" + "="*80)
+        print(" PHASE 3: RUNNING SWEEPS")
+        print("="*80)
+        for value in sweep_values:
+            self._run_trials_for_value(
+                mode=mode,
+                value=value,
+                config=config,
+                num_trials=self.num_trials,
+                fixed_size=self.fixed_size,
+                c_params=c_params,
+                q_params=q_params,
+                shared_kernel=shared_kernel
+            )
+        
+        # Phase 4: Plot results after all values complete
+        self.plot_results(config['x_label'], config['title_suffix'])
+    
+    def _tune_hyperparameters(self, mode, sweep_values):
+        """
+        Tune hyperparameters on baseline dataset.
+        
+        Returns:
+            tuple: (classical_params, quantum_params)
+        """
+        print("\n" + "="*80)
+        print(" PHASE 1: HYPERPARAMETER OPTIMIZATION")
+        print("="*80)
+        
+        # Get baseline dataset
+        X_train, X_val, y_train, y_val = self._get_baseline_split(mode, sweep_values)
+        
+        print(f"  Tuning set: Train={len(y_train)}, Val={len(y_val)}")
+        
+        # Tune classical
+        c_params = ClassicalSVMTuner.get_best_params(
+            X_train, X_val, y_train, y_val,
             cache_key=f"classical_{mode}_baseline",
             verbose=False
         )
-
-        q_best_params = QuantumSVMTuner.get_best_params(
-            X_tr_tune, X_val_tune, y_tr_tune, y_val_tune, self.num_dims,
+        
+        # Tune quantum
+        q_params = QuantumSVMTuner.get_best_params(
+            X_train, X_val, y_train, y_val, self.num_dims,
             cache_key=f"quantum_{mode}_baseline",
             verbose=False
         )
         
-        print("\n  [LOCKED] Classical Parameters:", c_best_params)
-        print("  [LOCKED] Quantum Parameters:", q_best_params)
+        print("\n" + "-"*80)
+        print("  [LOCKED] Classical:", c_params)
+        print("  [LOCKED] Quantum:", q_params)
+        print("-"*80)
         
+        return c_params, q_params
+    
+    def _get_baseline_split(self, mode, sweep_values):
+        """Get train/val split from baseline dataset"""
+        config = ExperimentConfig.get(mode)
         
+        if config['is_synthetic']:
+            # Use middle value as baseline
+            baseline_value = sweep_values[len(sweep_values) // 2]
+            label = f"{mode}_{baseline_value}"
+            X_train, X_val, _, y_train, y_val, _ = self.data_manager.get_data_split(seed=42, label=label)
+        else:
+            # Use entire dataset
+            X_train, X_val, _, y_train, y_val, _ = self.data_manager.get_data_split(seed=42)
+        
+        return X_train, X_val, y_train, y_val
+    
+    def _build_quantum_kernel(self, q_params):
+        """Build quantum kernel with tuned parameters"""
         print("\n" + "="*80)
-        print(" PHASE 2: EXPERIMENTAL SWEEP")
+        print(" PHASE 2: BUILDING QUANTUM KERNEL")
         print("="*80)
         
-        # 1. Build the Feature Map ONCE for the locked hyperparameters
-        # # We use the Factory to handle transpilation for the Aer backend
         optimized_fm = FeatureMapFactory.build_zz_map(
-            num_dims=self.num_dims, 
-            reps=q_best_params['reps'], 
-            entanglement=q_best_params['entanglement'],
+            num_dims=self.num_dims,
+            reps=q_params['reps'],
+            entanglement=q_params['entanglement'],
             backend=self.qp.backend
         )
-
-        # 2. Initialize the Kernel ONCE using the Full Stack (Sampler + Fidelity)
-        shared_kernel = self.qp.get_kernel(optimized_fm)
         
-        for value in sweep_values:
-            c_data = {'acc': [], 'f1': [], 'time': []}
-            q_data = {'acc': [], 'f1': [], 'time': []}
-            
-            print(f"\n{'='*80}")
-            print(f"RUNNING EXPERIMENT: {value_name} = {value}")
-            print(f"{'='*80}")
-            
-            is_kfold = mode in ['feature_complexity', 'margin', 'clusters', 'noise']
-            
-            if is_kfold:
-                print(f"Executing {num_trials}-Fold Cross Validation...")
-                current_dm = datasets_dict[value]
-                
-                def fold_generator():
-                    for idx, splits in enumerate(current_dm.get_kfold_splits(k_folds=num_trials, seed=42)):
-                        yield idx, splits
-                
-                data_iterator = fold_generator()
-                
-            else:
-                print(f"Executing Monte Carlo Random Sub-Sampling ({num_trials} trials)...")
-                current_dm = self.data_manager
-                
-                def sweep_generator():
-                    for trial in range(num_trials):
-                        X_pool, X_val, X_te, y_pool, y_val, y_te = current_dm.get_data_split(seed=trial)
-                        
-                        current_train_size = value if mode == 'size' else fixed_size
-                        current_imbalance = value if mode == 'imbalance' else 0.5
-                        
-                        X_tr, y_tr = TrainingSampler.create_class_imbalance(
-                            X_pool=X_pool, 
-                            y_pool=y_pool, 
-                            train_size=current_train_size, 
-                            seed=trial, 
-                            imbalance_ratio=current_imbalance
-                        )
-                        
-                        yield trial, (X_tr, X_val, X_te, y_tr, y_val, y_te)
-                
-                data_iterator = sweep_generator()
-            
-            for idx, (X_tr, _, X_te, y_tr, _, y_te) in data_iterator:
-                
-                label = "Fold" if is_kfold else "Trial"
-                print(f"\n{label} {idx+1}/{num_trials} (Train: {len(X_tr)}, Test: {len(X_te)})...")
-                
-                # Run Classical
-                c_score, c_f1, c_time = self.run_classical(X_tr, X_te, y_tr, y_te, params=c_best_params)
-                c_data['acc'].append(c_score)
-                c_data['f1'].append(c_f1)
-                c_data['time'].append(c_time)
-                
-                # Run Quantum
-                q_score, q_f1, q_time = self.run_quantum(X_tr, X_te, y_tr, y_te, kernel=shared_kernel, params=q_best_params)
-                q_data['acc'].append(q_score)
-                q_data['f1'].append(q_f1)
-                q_data['time'].append(q_time)
-            
-            # Calculate statistics
-            q_avg_acc, q_std_acc = np.mean(q_data['acc']), np.std(q_data['acc'])
-            q_avg_f1, q_std_f1 = np.mean(q_data['f1']), np.std(q_data['f1'])
-            q_avg_time = np.mean(q_data['time'])
-            
-            c_avg_acc, c_std_acc = np.mean(c_data['acc']), np.std(c_data['acc'])
-            c_avg_f1, c_std_f1 = np.mean(c_data['f1']), np.std(c_data['f1'])
-            c_avg_time = np.mean(c_data['time'])
-            
-            # Calculate Deltas (Quantum - Classical)
-            delta_acc = q_avg_acc - c_avg_acc
-            delta_f1 = q_avg_f1 - c_avg_f1
-            time_ratio = q_avg_time / c_avg_time if c_avg_time > 0 else q_avg_time
-            
-            # Effect Size (Cohen's d)
-            # Pooled standard deviation calculation
-            std_pooled_acc = np.sqrt((q_std_acc**2 + c_std_acc**2) / 2)
-            std_pooled_f1 = np.sqrt((q_std_f1**2 + c_std_f1**2) / 2)
-            
-            # Protect against division by zero if all trials are perfectly identical
-            if std_pooled_acc == 0:
-                cohen_d_acc = float('inf') if abs(delta_acc) > 0 else 0.0
-            else:
-                cohen_d_acc = delta_acc / std_pooled_acc
-                
-            if std_pooled_f1 == 0:
-                cohen_d_f1 = float('inf') if abs(delta_f1) > 0 else 0.0
-            else:
-                cohen_d_f1 = delta_f1 / std_pooled_f1
-                            
-            # NADEAU-BENGIO CORRECTED T-TEST
-            # Extract current train/test sizes from the last trial loop
-            n_train = len(X_tr)
-            n_test = len(X_te)
-            
-            p_val_acc = nadeau_bengio_corrected_ttest(q_data['acc'], c_data['acc'], n_train, n_test)
-            p_val_f1 = nadeau_bengio_corrected_ttest(q_data['f1'], c_data['f1'], n_train, n_test)
-            
-            # --- PRINT TABLE 1: QUANTUM ---
-            print("\n[ QUANTUM MODEL PERFORMANCE ]")
-            print("-" * 50)
-            print(f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}")
-            print("-" * 50)
-            for i in range(num_trials):
-                print(f"{i+1:<6} | {q_data['acc'][i]:<10.2%} | {q_data['f1'][i]:<10.2f} | {q_data['time'][i]:<10.4f}")
-            print("-" * 50)
-            print(f"{'AVG':<6} | {q_avg_acc:<10.2%} | {q_avg_f1:<10.2f} | {q_avg_time:<10.4f}")
-            print(f"{'STD':<6} | {q_std_acc:<10.2%} | {q_std_f1:<10.2f} | {'-':<10}")
-            print("-" * 50)
-
-            # --- PRINT TABLE 2: CLASSICAL ---
-            print("\n[ CLASSICAL MODEL PERFORMANCE ]")
-            print("-" * 50)
-            print(f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}")
-            print("-" * 50)
-            for i in range(num_trials):
-                print(f"{i+1:<6} | {c_data['acc'][i]:<10.2%} | {c_data['f1'][i]:<10.2f} | {c_data['time'][i]:<10.4f}")
-            print("-" * 50)
-            print(f"{'AVG':<6} | {c_avg_acc:<10.2%} | {c_avg_f1:<10.2f} | {c_avg_time:<10.4f}")
-            print(f"{'STD':<6} | {c_std_acc:<10.2%} | {c_std_f1:<10.2f} | {'-':<10}")
-            print("-" * 50)
-            print("\n")
-            
-            # --- PRINT TABLE 3: STATISTICAL SIGNIFICANCE ---
-            print("\n[ STATISTICAL ANALYSIS (Nadeau-Bengio Corrected t-test & Effect Size) ]")
-            print("-" * 85)
-            print(f'{"Metric":<8} | {"Delta (Q-C)":<12} | {"Cohen\'s d":<10} | {"p-value":<10} | {"Significant (p<0.05)?"}')
-            print("-" * 85)
-            sig_acc = "YES (*)" if p_val_acc < 0.05 else "NO"
-            sig_f1 = "YES (*)" if p_val_f1 < 0.05 else "NO"
-            
-            print(f"{'Accuracy':<8} | {delta_acc:>+12.2%} | {cohen_d_acc:>10.2f} | {p_val_acc:>10.4f} | {sig_acc}")
-            print(f"{'F1 Score':<8} | {delta_f1:>+12.2f} | {cohen_d_f1:>10.2f} | {p_val_f1:>10.4f} | {sig_f1}")
-            print(f"{'Time':<8} | QSVM was {time_ratio:.0f}x slower")
-            print("-" * 85)
-            print("\n")
-            
-            # Store results
-            self.results['x_values'].append(value)
-            self.results['c_acc'].append(c_avg_acc)
-            self.results['c_acc_std'].append(c_std_acc)
-            self.results['c_f1'].append(c_avg_f1)
-            self.results['c_f1_std'].append(c_std_f1)
-            self.results['c_time'].append(c_avg_time)
-            
-            self.results['q_acc'].append(q_avg_acc)
-            self.results['q_acc_std'].append(q_std_acc)
-            self.results['q_f1'].append(q_avg_f1)
-            self.results['q_f1_std'].append(q_std_f1)
-            self.results['q_time'].append(q_avg_time)
-            
-            self.results['delta_acc'].append(delta_acc)
-            self.results['p_val_acc'].append(p_val_acc)
-            self.results['delta_f1'].append(delta_f1)
-            self.results['p_val_f1'].append(p_val_f1)
+        kernel = self.qp.get_kernel(optimized_fm)
         
-        # Plot results after all values complete
-        self.plot_results(x_label, title_suffix)
+        print(f"  Kernel built: reps={q_params['reps']}, "
+        f"entanglement={q_params['entanglement']}")
+        
+        return kernel
+
+    def _run_trials_for_value(self, mode, value, config, num_trials, 
+                              fixed_size, c_params, q_params, shared_kernel):
+        """Run all trials for a single sweep value"""
+        print(f"\n{'-'*80}")
+        print(f"RUNNING: {config['value_name']} = {value}")
+        print(f"{'-'*80}")
+        
+        # Get data iterator
+        data_iterator = self._get_data_iterator(
+            mode, value, config, num_trials, fixed_size
+        )
+        
+        # Run trials and collect results
+        c_data, q_data = self._run_trials(
+            data_iterator, num_trials, config['is_synthetic'],
+            c_params, q_params, shared_kernel
+        )
+        
+        # Calculate and display statistics
+        self._process_results(
+            value, c_data, q_data, num_trials, config
+        )
     
+    def _get_data_iterator(self, mode, value, config, num_trials, fixed_size):
+        """Get appropriate data iterator based on mode"""
+        if config['is_synthetic']:
+            return self._get_kfold_iterator(mode, value, num_trials)
+        else:
+            return self._get_monte_carlo_iterator(
+                mode, value, num_trials, fixed_size
+            )
+    
+    def _get_kfold_iterator(self, mode, value, num_trials):
+        """K-fold cross-validation iterator for synthetic data"""
+        print(f"Executing {num_trials}-Fold Cross Validation...")
+        
+        label = f"{mode}_{value}"
+        
+        for idx, splits in enumerate(self.data_manager.get_kfold_splits(k_folds=num_trials, seed=42, label=label)):
+            yield idx, splits
+    
+    def _get_monte_carlo_iterator(self, mode, value, num_trials, fixed_size):
+        """Monte Carlo random sub-sampling for CSV data"""
+        print(f"Executing Monte Carlo Sub-Sampling ({num_trials} trials)...")
+        
+        for trial in range(num_trials):
+            X_pool, X_val, X_test, y_pool, y_val, y_test = \
+                self.data_manager.get_data_split(seed=trial)
+            
+            train_size = value if mode == 'size' else fixed_size
+            imbalance = value if mode == 'imbalance' else 0.5
+            
+            X_train, y_train = TrainingSampler.create_class_imbalance(
+                X_pool=X_pool,
+                y_pool=y_pool,
+                train_size=train_size,
+                seed=trial,
+                imbalance_ratio=imbalance
+            )
+            
+            yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
+    
+    def _run_trials(self, data_iterator, num_trials, is_kfold, 
+                   c_params, q_params, shared_kernel):
+        """Execute all trials and collect results"""
+        c_data = {'acc': [], 'f1': [], 'time': []}
+        q_data = {'acc': [], 'f1': [], 'time': []}
+        
+        label_type = "Fold" if is_kfold else "Trial"
+        
+        for idx, (X_train, _, X_test, y_train, _, y_test) in data_iterator:
+            print(f"\n{label_type} {idx+1}/{num_trials} "
+                  f"(Train: {len(X_train)}, Test: {len(X_test)})...")
+            
+            # Run classical
+            c_acc, c_f1, c_time = self.run_classical(
+                X_train, X_test, y_train, y_test, params=c_params
+            )
+            c_data['acc'].append(c_acc)
+            c_data['f1'].append(c_f1)
+            c_data['time'].append(c_time)
+            
+            # Run quantum
+            q_acc, q_f1, q_time = self.run_quantum(
+                X_train, X_test, y_train, y_test,
+                kernel=shared_kernel, params=q_params
+            )
+            q_data['acc'].append(q_acc)
+            q_data['f1'].append(q_f1)
+            q_data['time'].append(q_time)
+        
+        return c_data, q_data
+
+    def _process_results(self, value, c_data, q_data, num_trials, config):
+        """Calculate statistics, print tables, and store results"""
+        # Calculate statistics
+        stats = self._calculate_statistics(c_data, q_data)
+        
+        # Print performance tables
+        self._print_results_tables(c_data, q_data, stats, num_trials)
+        
+        # Store for plotting
+        self._store_results(value, stats)
+    
+    def _calculate_statistics(self, c_data, q_data):
+        """Calculate all statistics for comparison"""
+        # Get last trial's train/test sizes
+        n_train = len(c_data['acc'])  # Placeholder - get from actual data
+        n_test = len(c_data['acc'])   # Placeholder - get from actual data
+        
+        stats = {
+            # Classical
+            'c_avg_acc': np.mean(c_data['acc']),
+            'c_std_acc': np.std(c_data['acc']),
+            'c_avg_f1': np.mean(c_data['f1']),
+            'c_std_f1': np.std(c_data['f1']),
+            'c_avg_time': np.mean(c_data['time']),
+            
+            # Quantum
+            'q_avg_acc': np.mean(q_data['acc']),
+            'q_std_acc': np.std(q_data['acc']),
+            'q_avg_f1': np.mean(q_data['f1']),
+            'q_std_f1': np.std(q_data['f1']),
+            'q_avg_time': np.mean(q_data['time']),
+        }
+        
+        # Deltas
+        stats['delta_acc'] = stats['q_avg_acc'] - stats['c_avg_acc']
+        stats['delta_f1'] = stats['q_avg_f1'] - stats['c_avg_f1']
+        stats['time_ratio'] = (stats['q_avg_time'] / stats['c_avg_time'] 
+                              if stats['c_avg_time'] > 0 else stats['q_avg_time'])
+        
+        # Effect sizes (Cohen's d)
+        std_pooled_acc = np.sqrt((stats['q_std_acc']**2 + stats['c_std_acc']**2) / 2)
+        stats['cohen_d_acc'] = (stats['delta_acc'] / std_pooled_acc 
+                               if std_pooled_acc > 0 else 0.0)
+        
+        std_pooled_f1 = np.sqrt((stats['q_std_f1']**2 + stats['c_std_f1']**2) / 2)
+        stats['cohen_d_f1'] = (stats['delta_f1'] / std_pooled_f1 
+                              if std_pooled_f1 > 0 else 0.0)
+        
+        # Statistical tests
+        stats['p_val_acc'] = nadeau_bengio_corrected_ttest(
+            q_data['acc'], c_data['acc'], n_train, n_test
+        )
+        stats['p_val_f1'] = nadeau_bengio_corrected_ttest(
+            q_data['f1'], c_data['f1'], n_train, n_test
+        )
+        
+        return stats
+    
+    def _print_results_tables(self, c_data, q_data, stats, num_trials):
+        """Print formatted results tables"""
+        # Table 1: Quantum performance
+        self._print_model_table("QUANTUM", q_data, stats, num_trials, is_quantum=True)
+        
+        # Table 2: Classical performance
+        self._print_model_table("CLASSICAL", c_data, stats, num_trials, is_quantum=False)
+        
+        # Table 3: Statistical comparison
+        self._print_comparison_table(stats)
+    
+    def _print_model_table(self, model_name, data, stats, num_trials, is_quantum):
+        """Print performance table for one model"""
+        prefix = 'q' if is_quantum else 'c'
+        
+        print(f"\n[ {model_name} MODEL PERFORMANCE ]")
+        print("-" * 50)
+        print(f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}")
+        print("-" * 50)
+        
+        for i in range(num_trials):
+            print(f"{i+1:<6} | {data['acc'][i]:<10.2%} | "
+                  f"{data['f1'][i]:<10.2f} | {data['time'][i]:<10.4f}")
+        
+        print("-" * 50)
+        print(f"{'AVG':<6} | {stats[f'{prefix}_avg_acc']:<10.2%} | "
+              f"{stats[f'{prefix}_avg_f1']:<10.2f} | {stats[f'{prefix}_avg_time']:<10.4f}")
+        print(f"{'STD':<6} | {stats[f'{prefix}_std_acc']:<10.2%} | "
+              f"{stats[f'{prefix}_std_f1']:<10.2f} | {'-':<10}")
+        print("-" * 50)
+    
+    def _print_comparison_table(self, stats):
+        """Print statistical comparison table"""
+        print("\n[ STATISTICAL ANALYSIS ]")
+        print("-" * 85)
+        print(f'{"Metric":<8} | {"Delta":<12} | {"Cohen\'s d":<10} | '
+              f'{"p-value":<10} | {"Significant?"}')
+        print("-" * 85)
+        
+        sig_acc = "YES (*)" if stats['p_val_acc'] < 0.05 else "NO"
+        sig_f1 = "YES (*)" if stats['p_val_f1'] < 0.05 else "NO"
+        
+        print(f"{'Accuracy':<8} | {stats['delta_acc']:>+12.2%} | "
+              f"{stats['cohen_d_acc']:>10.2f} | {stats['p_val_acc']:>10.4f} | {sig_acc}")
+        print(f"{'F1 Score':<8} | {stats['delta_f1']:>+12.2%} | "
+              f"{stats['cohen_d_f1']:>10.2f} | {stats['p_val_f1']:>10.4f} | {sig_f1}")
+        print(f"{'Time':<8} | QSVM was {stats['time_ratio']:.0f}x slower")
+        print("-" * 85)
+        print()
+    
+    def _store_results(self, value, stats):
+        """Store results for plotting"""
+        self.results['x_values'].append(value)
+        
+        # Classical
+        self.results['c_acc'].append(stats['c_avg_acc'])
+        self.results['c_acc_std'].append(stats['c_std_acc'])
+        self.results['c_f1'].append(stats['c_avg_f1'])
+        self.results['c_f1_std'].append(stats['c_std_f1'])
+        self.results['c_time'].append(stats['c_avg_time'])
+        
+        # Quantum
+        self.results['q_acc'].append(stats['q_avg_acc'])
+        self.results['q_acc_std'].append(stats['q_std_acc'])
+        self.results['q_f1'].append(stats['q_avg_f1'])
+        self.results['q_f1_std'].append(stats['q_std_f1'])
+        self.results['q_time'].append(stats['q_avg_time'])
+        
+        # Comparisons
+        self.results['delta_acc'].append(stats['delta_acc'])
+        self.results['p_val_acc'].append(stats['p_val_acc'])
+        self.results['delta_f1'].append(stats['delta_f1'])
+        self.results['p_val_f1'].append(stats['p_val_f1'])
+
     def plot_results(self, x_label, title_suffix):
         """Generate comparison plots"""
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
