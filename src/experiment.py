@@ -18,6 +18,7 @@ Attribution:
 
 # %%
 # Imports
+import os
 import time
 import warnings
 import numpy as np
@@ -234,8 +235,91 @@ class ExperimentRunner():
             )
         
         # Phase 4: Plot results after all values complete
-        self.plot_results(config['x_label'], config['title_suffix'])
+        self.plot_results(config['is_synthetic'], config['x_label'], config['title_suffix'], config['value_name'])
     
+    def plot_results(self, is_synthetic, x_label, title_suffix, value_name):
+        """Generate, save, and display individual comparison plots"""
+        
+        # 1. Determine the base name based on your condition
+        if is_synthetic:
+            base_name = "synthetic"
+        else:
+            # Grab the filename from the data manager and strip the .csv extension
+            base_name = self.data_manager.filename.replace('.csv', '')
+            
+        # 2. Format the folder name safely
+        folder_name = f"{base_name}_{value_name}"
+        safe_folder = folder_name.replace(' ', '_').lower()
+        
+        # 3. Get directories and create the save path
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        save_dir = os.path.join(parent_dir, "results_plots", safe_folder)
+        
+        # Create the directory if it doesn't exist
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"\nSaving plots to: {save_dir}/")
+        
+        
+        # Accuracy Plot
+        plt.figure(figsize=(8, 6))
+        plt.errorbar(self.results['x_values'], self.results['c_acc'], 
+                     yerr=self.results['c_acc_std'], fmt='o-', capsize=5, 
+                     label='Classical', color='blue')
+        plt.errorbar(self.results['x_values'], self.results['q_acc'], 
+                     yerr=self.results['q_acc_std'], fmt='s-', capsize=5, 
+                     label='Quantum', color='purple')
+        
+        plt.title(f'Accuracy {title_suffix}')
+        plt.xlabel(x_label)
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        # Save and show
+        plt.savefig(os.path.join(save_dir, 'accuracy.png'), dpi=300)
+        plt.show()
+        
+        # F1 Score Plot
+        plt.figure(figsize=(8, 6))
+        plt.errorbar(self.results['x_values'], self.results['c_f1'], 
+                     yerr=self.results['c_f1_std'], fmt='o-', capsize=5, 
+                     label='Classical', color='blue')
+        plt.errorbar(self.results['x_values'], self.results['q_f1'], 
+                     yerr=self.results['q_f1_std'], fmt='s-', capsize=5, 
+                     label='Quantum', color='purple')
+        
+        plt.title(f'F1 Score {title_suffix}')
+        plt.xlabel(x_label)
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        # Save and show
+        plt.savefig(os.path.join(save_dir, 'f1_score.png'), dpi=300)
+        plt.show()
+        
+        # Training Time Plot
+        plt.figure(figsize=(8, 6))
+        plt.plot(self.results['x_values'], self.results['c_time'], 
+                 'o-', label='Classical', color='blue')
+        plt.plot(self.results['x_values'], self.results['q_time'], 
+                 's-', label='Quantum', color='purple')
+        
+        plt.title(f'Training Time {title_suffix}')
+        plt.yscale('log')
+        plt.xlabel(x_label)
+        plt.ylabel('Time (s)')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        # Save and show
+        plt.savefig(os.path.join(save_dir, 'training_time.png'), dpi=300)
+        plt.show()
+        
     def _tune_hyperparameters(self, mode, sweep_values):
         """
         Tune hyperparameters on baseline dataset.
@@ -533,49 +617,6 @@ class ExperimentRunner():
         self.results['delta_f1'].append(stats['delta_f1'])
         self.results['p_val_f1'].append(stats['p_val_f1'])
 
-    def plot_results(self, x_label, title_suffix):
-        """Generate comparison plots"""
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-        
-        # Accuracy with error bars
-        ax1.errorbar(self.results['x_values'], self.results['c_acc'], 
-                     yerr=self.results['c_acc_std'], fmt='o-', capsize=5, 
-                     label='Classical', color='blue')
-        ax1.errorbar(self.results['x_values'], self.results['q_acc'], 
-                     yerr=self.results['q_acc_std'], fmt='s-', capsize=5, 
-                     label='Quantum', color='purple')
-        ax1.set_title(f'Accuracy {title_suffix}')
-        ax1.set_xlabel(x_label)
-        ax1.set_ylabel('Accuracy')
-        ax1.legend()
-        ax1.grid(True)
-        
-        # F1 Score with error bars
-        ax2.errorbar(self.results['x_values'], self.results['c_f1'], 
-                     yerr=self.results['c_f1_std'], fmt='o-', capsize=5, 
-                     label='Classical', color='blue')
-        ax2.errorbar(self.results['x_values'], self.results['q_f1'], 
-                     yerr=self.results['q_f1_std'], fmt='s-', capsize=5, 
-                     label='Quantum', color='purple')
-        ax2.set_title(f'F1 Score {title_suffix}')
-        ax2.set_xlabel(x_label)
-        ax2.set_ylabel('F1 Score')
-        ax2.legend()
-        ax2.grid(True)
-        
-        # Time (log scale)
-        ax3.plot(self.results['x_values'], self.results['c_time'], 
-                 'o-', label='Classical', color='blue')
-        ax3.plot(self.results['x_values'], self.results['q_time'], 
-                 's-', label='Quantum', color='purple')
-        ax3.set_title(f'Training Time {title_suffix}')
-        ax3.set_yscale('log')
-        ax3.set_xlabel(x_label)
-        ax3.set_ylabel('Time (s)')
-        ax3.legend()
-        ax3.grid(True)
-        
-        plt.tight_layout()
-        plt.show()
+
 
 # %%

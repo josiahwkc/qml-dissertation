@@ -93,6 +93,7 @@ class AdhocDataManager():
 class CSVDataManager():
     """Manages arbitrary CSV datasets with automatic preprocessing"""
     def __init__(self):
+        self.filename = None
         self.X = None
         self.y = None
     
@@ -108,6 +109,7 @@ class CSVDataManager():
             drop_cols: List of columns to drop before processing
             max_samples: Maximum total samples to use (for large datasets like MNIST)
         """
+        self.filename = filename
         self.num_dims = num_dims
         self.target_col = target_col
         
@@ -247,7 +249,7 @@ class CSVDataManager():
         preprocessing_pipeline = Pipeline([
             ('std_scaler', StandardScaler()),
             ('pca', PCA(n_components=self.num_dims)),
-            ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
         ])
         
         # Fit on X_train, transform all
