@@ -37,37 +37,6 @@ from feature_map_factory import FeatureMapFactory
 
 # %%
 # Experiment Class
-def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
-    """
-    Computes the Nadeau-Bengio corrected paired t-test for repeated 
-    train/test splits. Corrects for the variance underestimation caused 
-    by overlapping training sets.
-    
-    Ref: Nadeau, C., and Bengio, Y. (2003). Inference for the Generalization Error.
-    """
-    differences = np.array(q_scores) - np.array(c_scores)
-    k = len(differences)
-    
-    if k < 2:
-        return 1.0 # Need at least 2 trials for variance
-        
-    mean_diff = np.mean(differences)
-    var_diff = np.var(differences, ddof=1)
-    
-    if var_diff == 0:
-        return 1.0 # No variance, identical models
-        
-    # The Nadeau-Bengio variance correction
-    # (1/k) accounts for the number of trials
-    # (n_test/n_train) accounts for the overlap in training data
-    corrected_variance = var_diff * ((1 / k) + (n_test / n_train))
-    
-    t_stat = mean_diff / np.sqrt(corrected_variance)
-    
-    # Calculate two-tailed p-value
-    p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
-    return p_val
-
 class ExperimentConfig:
     """Configuration for experiment modes"""
     
@@ -534,14 +503,45 @@ class ExperimentRunner():
                               if std_pooled_f1 > 0 else 0.0)
         
         # Statistical tests
-        stats['p_val_acc'] = nadeau_bengio_corrected_ttest(
+        stats['p_val_acc'] = self._nadeau_bengio_corrected_ttest(
             q_data['acc'], c_data['acc'], n_train, n_test
         )
-        stats['p_val_f1'] = nadeau_bengio_corrected_ttest(
+        stats['p_val_f1'] = self._nadeau_bengio_corrected_ttest(
             q_data['f1'], c_data['f1'], n_train, n_test
         )
         
         return stats
+    
+    def _nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
+        """
+        Computes the Nadeau-Bengio corrected paired t-test for repeated 
+        train/test splits. Corrects for the variance underestimation caused 
+        by overlapping training sets.
+        
+        Ref: Nadeau, C., and Bengio, Y. (2003). Inference for the Generalization Error.
+        """
+        differences = np.array(q_scores) - np.array(c_scores)
+        k = len(differences)
+        
+        if k < 2:
+            return 1.0 # Need at least 2 trials for variance
+            
+        mean_diff = np.mean(differences)
+        var_diff = np.var(differences, ddof=1)
+        
+        if var_diff == 0:
+            return 1.0 # No variance, identical models
+            
+        # The Nadeau-Bengio variance correction
+        # (1/k) accounts for the number of trials
+        # (n_test/n_train) accounts for the overlap in training data
+        corrected_variance = var_diff * ((1 / k) + (n_test / n_train))
+        
+        t_stat = mean_diff / np.sqrt(corrected_variance)
+        
+        # Calculate two-tailed p-value
+        p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
+        return p_val
     
     def _print_results_tables(self, c_data, q_data, stats, num_trials):
         """Print formatted results tables"""
