@@ -223,7 +223,7 @@ class ExperimentRunner():
         # 3. Get directories and create the save path
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
-        save_dir = os.path.join(parent_dir, "results_plots", safe_folder)
+        save_dir = os.path.join(parent_dir, "results", safe_folder)
         
         # Create the directory if it doesn't exist
         os.makedirs(save_dir, exist_ok=True)
