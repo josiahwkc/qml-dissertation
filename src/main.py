@@ -20,7 +20,7 @@ N_CLASS = 2           # Binary classification
 FIXED_SIZE = 100      # Default training size for non-'size' experiments
 
 SWEEP_VALUES_DICT = {
-    'size': [20, 40, 60, 80, 100],
+    'size': [10, 50, 100, 150, 200, 250, 300],
     'imbalance': [0.5, 0.6, 0.7, 0.8, 0.9],
     'feature_complexity': [1, 2, 3, 4, 5],
     'margin': [0.1, 0.5, 1.0, 1.5, 2.0],
@@ -46,12 +46,24 @@ def main():
     print(f"Initialising Experiment Runner in '{experiment_mode}' mode...")
 
     if experiment_mode == 'size':
-        runner.initialise_datasets(mode='size', filename='fashion-mnist_train.csv', target_col='label')
-        runner.run_experiment(mode='size')
+        runner.initialise_datasets(mode=experiment_mode, filename='mnist_train.csv', target_col='label')
+        runner.run_experiment(mode=experiment_mode)
+        
+        runner.initialise_datasets(mode=experiment_mode, filename='fashion-mnist_train.csv', target_col='label')
+        runner.run_experiment(mode=experiment_mode)
+        
+        runner.initialise_datasets(mode=experiment_mode, filename='breast-cancer.csv', target_col='diagnosis')
+        runner.run_experiment(mode=experiment_mode)
         
     elif experiment_mode == 'imbalance':
-        runner.initialise_datasets(mode='imbalance', filename='breast-cancer.csv', target_col='diagnosis')
-        runner.run_experiment(mode='imbalance')
+        runner.initialise_datasets(mode=experiment_mode, filename='mnist_train.csv', target_col='label')
+        runner.run_experiment(mode=experiment_mode)
+        
+        runner.initialise_datasets(mode=experiment_mode, filename='fashion-mnist_train.csv', target_col='label')
+        runner.run_experiment(mode=experiment_mode)
+        
+        runner.initialise_datasets(mode=experiment_mode, filename='breast-cancer.csv', target_col='diagnosis')
+        runner.run_experiment(mode=experiment_mode)
     
     # Perform experiment on synthetic datasets
     else:
