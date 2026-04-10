@@ -96,7 +96,7 @@ class CSVDataManager():
         self.X = None
         self.y = None
     
-    def load_dataset(self, filename, target_col, num_dims, n_class=2, 
+    def load_dataset(self, filename, target_col, num_dims=5, n_class=2, 
                  categorical_cols=None, drop_cols=None, max_samples=1000):
         """
         Args:

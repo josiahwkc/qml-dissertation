@@ -1,18 +1,20 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-# Assuming CSVDataManager is imported as before
 from data_manager import CSVDataManager
 
-def plot_pca_variance(csv_filename, target_col, max_samples=1000, limit=16):
+def plot_pca_variance(csv_filename, target_col, max_samples=1000, limit=16, output_folder='pca analysis plots'):
     """
-    Plots cumulative explained variance for the first 'limit' components.
+    Plots cumulative explained variance with an improved, high-clarity layout.
     """
-    print(f"Analyzing PCA Variance for {csv_filename} (Max {limit} components)...")
+    print(f"Analyzing PCA Variance for {csv_filename}...")
     
-    manager = CSVDataManager(filename=csv_filename, target_col=target_col, max_samples=max_samples)
+    # Assuming CSVDataManager is your custom loader
+    manager = CSVDataManager()
+    manager.load_dataset(filename=csv_filename, target_col=target_col, max_samples=max_samples)
     X_raw = manager.X
     
     # 1. Scale and Fit
@@ -22,51 +24,77 @@ def plot_pca_variance(csv_filename, target_col, max_samples=1000, limit=16):
     pca = PCA()
     pca.fit(X_scaled)
     
-    # 2. Extract and Slice to the first 16 components
+    # 2. Extract Data
     exp_var_full = pca.explained_variance_ratio_ * 100
     cum_exp_var_full = np.cumsum(exp_var_full)
     
-    # Slice arrays to the user-defined limit
     plot_limit = min(limit, len(cum_exp_var_full))
     exp_var = exp_var_full[:plot_limit]
     cum_exp_var = cum_exp_var_full[:plot_limit]
-    indices = range(1, plot_limit + 1)
+    indices = np.arange(1, plot_limit + 1)
     
     # 3. Generate Plot
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 7), facecolor='#fdfdfd') # Light clean background
     
-    # Individual variance bars
-    plt.bar(indices, exp_var, alpha=0.4, align='center',
-            label='Individual Explained Variance', color='steelblue')
+    # Individual variance (Bars)
+    bars = plt.bar(indices, exp_var, alpha=0.3, align='center',
+                   label='Individual Variance', color='royalblue', edgecolor='navy')
             
-    # Cumulative variance step plot
-    plt.step(indices, cum_exp_var, where='mid',
-             label='Cumulative Explained Variance', color='darkorange', linewidth=2)
+    # Cumulative variance (Step + Area Fill)
+    plt.step(indices, cum_exp_var, where='mid', label='Cumulative Variance', 
+             color='darkorange', linewidth=2.5, zorder=3)
 
-    # 4. Label every N (1 through 16)
+    # 4. Annotations and Markers
     for i, variance in enumerate(cum_exp_var):
-        plt.text(i + 1, variance + 1.5, f'{variance:.1f}%', 
-                 ha='center', va='bottom', fontsize=8, fontweight='bold')
+        # Point markers
+        plt.scatter(i + 1, variance, color='darkorange', s=30, zorder=4)
         
-        # Point marker at each step
-        plt.plot(i + 1, variance, 'o', color='darkorange', markersize=4)
+        # Labeling (offset text slightly based on variance value)
+        plt.annotate(f'{variance:.1f}%', 
+                     (i + 1, variance), 
+                     textcoords="offset points", 
+                     xytext=(0, 10), 
+                     ha='center', 
+                     fontsize=9, 
+                     fontweight='bold',
+                     color='black')
 
-    # 5. Formatting
-    plt.ylabel('Explained Variance Ratio (%)')
-    plt.xlabel('Principal Component Index')
-    plt.title(f'Top {plot_limit} PCA Components: {csv_filename}')
+    # 6. Formatting & Aesthetics
+    plt.ylabel('Explained Variance (%)', fontsize=12, fontweight='bold')
+    plt.xlabel('Principal Components', fontsize=12, fontweight='bold')
+    plt.title(f'PCA Information Retention: {csv_filename}\n(Top {plot_limit} Components)', 
+              fontsize=14, pad=20)
     
-    plt.xticks(indices) # Force show all 16 indices
-    plt.ylim(0, 110)
-    plt.legend(loc='lower right')
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
+    plt.xticks(indices)
+    plt.xlim(0.5, plot_limit + 0.5)
+    plt.ylim(0, 105) # Cap at 105% for label breathing room
+    
+    # Add minor gridlines for better readability
+    plt.grid(axis='y', which='major', linestyle='-', alpha=0.2)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    
+    plt.legend(loc='lower right', frameon=True, shadow=True)
     plt.tight_layout()
     
     # Save and Show
-    output_filename = f"pca_top_{plot_limit}_{csv_filename.split('.')[0]}.png"
-    plt.savefig(output_filename, dpi=300)
-    print(f"Graph saved as {output_filename}")
-    plt.show()
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    output_folder = os.path.join(parent_dir, 'pca analysis plots')
+
+    # Create the folder if it doesn't exist
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created folder at: {output_folder}")
+        
+    base_name = csv_filename.split('.')[0]
+    file_name = f"pca_top_{plot_limit}_{base_name}.png"
+    save_path = os.path.join(output_folder, file_name)
+    
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Graph successfully saved to: {save_path}")
 
 # Run it
 plot_pca_variance("mnist_train.csv", "label", limit=16)
