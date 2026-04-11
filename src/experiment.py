@@ -512,7 +512,7 @@ class ExperimentRunner():
         
         return stats
     
-    def _nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
+    def _nadeau_bengio_corrected_ttest(self, q_scores, c_scores, n_train, n_test):
         """
         Computes the Nadeau-Bengio corrected paired t-test for repeated 
         train/test splits. Corrects for the variance underestimation caused 
