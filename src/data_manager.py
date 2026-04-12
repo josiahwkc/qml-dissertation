@@ -60,34 +60,59 @@ class TrainingSampler():
 
 class AdhocDataManager():
     """Generates synthetic data using Qiskit's ad_hoc_data"""
-    def __init__(self, num_dims, gap=0.3):
+    
+    def __init__(self):
+        self.X_pool = None
+        self.y_pool = None
+        self.X_test_fixed = None
+        self.y_test_fixed = None
+    
+    def create_dataset(self, num_dims=2, gap=0.3, pool_size=800, test_size=200):
+        """
+        Generate synthetic data using ad_hoc_data.
+        
+        Args:
+            num_dims: Number of features
+            gap: Class separation
+            pool_size: Size of training pool for sampling
+            test_size: Size of fixed test set
+        """
         self.num_dims = num_dims
-                
-        # Generate fixed pools
-        X_train_pool, y_train_pool, X_test_fixed, y_test_fixed = ad_hoc_data(
-            training_size=600, 
-            test_size=200, 
-            n=num_dims, 
-            gap=gap, 
-            plot_data=False
+        
+        # Generate data pool + fixed test set
+        X_pool, y_pool, X_test, y_test = ad_hoc_data(
+            training_size=pool_size,
+            test_size=test_size,
+            n=num_dims,
+            gap=gap,
+            plot_data=True
         )
         
         # Convert one-hot to 1D labels
-        self.X_pool = X_train_pool
-        self.y_pool = np.argmax(y_train_pool, axis=1)
-        
-        self.X_test_fixed = X_test_fixed
-        self.y_test_fixed = np.argmax(y_test_fixed, axis=1)
-        
+        self.X_pool = X_pool
+        self.y_pool = np.argmax(y_pool, axis=1)
+        self.X_test_fixed = X_test
+        self.y_test_fixed = np.argmax(y_test, axis=1)
+    
     def get_data_split(self, seed):
-        """Creates train/val/test split."""
+        """Create train/test/validation split with preprocessing"""
         
-        # Split the training pool into train (80%) and validation (20%)
+        # Split into 80% (of 800) train and 20% (of 200) validation
         X_train, X_val, y_train, y_val = train_test_split(
             self.X_pool, self.y_pool, test_size=0.2, random_state=seed, stratify=self.y_pool
         )
         
-        return X_train, X_val, self.X_test_fixed, y_train, y_val, self.y_test_fixed
+        # Preprocessing
+        preprocessing_pipeline = Pipeline([
+            ('std_scaler', StandardScaler()), 
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
+        ])
+        
+        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
+        X_test_processed = preprocessing_pipeline.transform(self.X_test_fixed)
+        X_val_processed = preprocessing_pipeline.transform(X_val)
+        
+        return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, self.y_test
 
 
 class CSVDataManager():
@@ -217,7 +242,7 @@ class CSVDataManager():
             preprocessing_pipeline = Pipeline([
                 ('std_scaler', StandardScaler()),
                 ('pca', PCA(n_components=self.num_dims)), 
-                ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+                ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
             ])
             
             X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
@@ -385,7 +410,7 @@ class SyntheticDataManager():
             
             preprocessing_pipeline = Pipeline([
                 ('std_scaler', StandardScaler()),
-                ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+                ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
             ])
             
             X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
@@ -418,7 +443,7 @@ class SyntheticDataManager():
         # Preprocessing
         preprocessing_pipeline = Pipeline([
             ('std_scaler', StandardScaler()), 
-            ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
         ])
         
         X_train_processed = preprocessing_pipeline.fit_transform(X_train)
