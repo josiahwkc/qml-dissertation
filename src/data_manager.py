@@ -112,7 +112,7 @@ class AdhocDataManager():
         X_test_processed = preprocessing_pipeline.transform(self.X_test_fixed)
         X_val_processed = preprocessing_pipeline.transform(X_val)
         
-        return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, self.y_test
+        return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, self.y_test_fixed
 
 
 class CSVDataManager():
