@@ -20,6 +20,7 @@ import os
 import time
 import warnings
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.svm import SVC
@@ -230,10 +231,11 @@ class ExperimentRunner():
     def clear_results(self):
         self.results = {
             'x_values': [],
-            'sizes': [],
             'q_acc': [], 'q_acc_std': [], 'q_f1': [], 'q_f1_std': [], 'q_time': [],
             'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
-            'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
+            'delta_acc': [], 'p_val_acc': [], 'cohen_d_acc': [],
+            'delta_f1': [], 'p_val_f1': [], 'cohen_d_f1': [],
+            'time_ratio': []
         }
        
     def run_classical(self, X_train, X_test, y_train, y_test, params):
@@ -319,38 +321,16 @@ class ExperimentRunner():
         
         # Phase 4: Plot results after all values complete
         self.plot_results(config)
+        save_dir, _ = self._get_output_meta(config)
+        
+        df = pd.DataFrame(self.results)
+        df.to_csv(os.path.join(save_dir, 'summary_metrics.csv'), index=False)
+        print(f"Data saved to {save_dir}/summary_metrics.csv")
     
     def plot_results(self, config):
         """Generate, save, and display individual comparison plots"""
         
-        data_source = config['data_source']
-        
-        # Determine the base name based on your condition
-        match(data_source):
-            case ExperimentConfig.DATA_SOURCE_CSV:
-                dataset_name = self.data_manager.filename
-                base_folder = dataset_name.replace('.csv', '')
-                
-            case ExperimentConfig.DATA_SOURCE_SKLEARN:
-                dataset_name = "Sklearn Synthetic"
-                base_folder = "sklearn_synthetic"     
-
-            case ExperimentConfig.DATA_SOURCE_QISKIT:
-                dataset_name = "Qiskit Ad Hoc"
-                base_folder = "qiskit_adhoc"
-                
-            case _:
-                dataset_name = "Unknown Dataset"
-                base_folder = "unknown"
-            
-        # Format the folder name safely
-        folder_name = f"{base_folder}_{config['value_name']}"
-        safe_folder = folder_name.replace(' ', '_').lower()
-        
-        # Get directories and create the save path
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        save_dir = os.path.join(parent_dir, "results", safe_folder)
+        save_dir, dataset_name = self._get_output_meta(config)
         
         # Create the directory if it doesn't exist
         os.makedirs(save_dir, exist_ok=True)
@@ -504,7 +484,7 @@ class ExperimentRunner():
         
         # Calculate and display statistics
         self._process_results(
-            value, c_data, q_data
+            value, c_data, q_data, mode
         )
     
     def _get_data_iterator(self, mode, value, config):
@@ -580,13 +560,13 @@ class ExperimentRunner():
         
         return c_data, q_data
 
-    def _process_results(self, value, c_data, q_data):
+    def _process_results(self, value, c_data, q_data, mode):
         """Calculate statistics, print tables, and store results"""
         # Calculate statistics
         stats = self._calculate_statistics(c_data, q_data)
         
         # Print performance tables
-        self._print_results_tables(c_data, q_data, stats)
+        self._print_results_tables(value, c_data, q_data, stats, mode)
         
         # Store for plotting
         self._store_results(value, stats)
@@ -669,61 +649,106 @@ class ExperimentRunner():
         p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
         return p_val
     
-    def _print_results_tables(self, c_data, q_data, stats):
-        """Print formatted results tables"""
-        # Table 1: Quantum performance
-        self._print_model_table("QUANTUM", q_data, stats)
+    def _print_results_tables(self, value, c_data, q_data, stats, mode):
+        """Generate formatted tables, print to console, and append to log file"""
+        config = ExperimentConfig.get(mode)
         
-        # Table 2: Classical performance
-        self._print_model_table("CLASSICAL", c_data, stats)
+        # 1. Build the text report as a list of strings
+        report = []
+        report.append(f"\n{'='*85}")
+        report.append(f"RESULTS FOR {config['value_name'].upper()}: {value}")
+        report.append(f"{'='*85}")
         
-        # Table 3: Statistical comparison
-        self._print_comparison_table(stats)
-    
-    def _print_model_table(self, model_name, data, stats):
-        """Print performance table for one model"""
-        if model_name == "QUANTUM":
-            prefix = 'q'
-        else:
-            prefix = 'c'
+        report.append(self._build_model_table_string("QUANTUM", q_data, stats))
+        report.append(self._build_model_table_string("CLASSICAL", c_data, stats))
+        report.append(self._build_comparison_table_string(stats))
         
-        print(f"\n[ {model_name} MODEL PERFORMANCE ]")
-        print("-" * 50)
-        print(f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}")
-        print("-" * 50)
+        # Combine list into a single massive string
+        full_report = "\n".join(report)
+        
+        # 2. Print to console for real-time monitoring
+        print(full_report)
+        
+        # 3. Unpack the tuple to safely get JUST the directory path
+        save_dir, _ = self._get_output_meta(config)
+        log_file = os.path.join(save_dir, 'detailed_report.txt')
+        
+        # 4. Append to detailed_report.txt in your results folder
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(full_report + "\n")
+
+    def _build_model_table_string(self, model_name, data, stats):
+        """Builds and returns the performance table string for one model"""
+        prefix = 'q' if model_name == "QUANTUM" else 'c'
+        lines = [
+            f"\n[ {model_name} MODEL PERFORMANCE ]",
+            "-" * 50,
+            f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}",
+            "-" * 50
+        ]
         
         for i in range(self.num_trials):
-            print(f"{i+1:<6} | {data['acc'][i]:<10.2%} | "
-                  f"{data['f1'][i]:<10.2f} | {data['time'][i]:<10.4f}")
-        
-        print("-" * 50)
-        print(f"{'AVG':<6} | {stats[f'{prefix}_avg_acc']:<10.2%} | "
-              f"{stats[f'{prefix}_avg_f1']:<10.2f} | {stats[f'{prefix}_avg_time']:<10.4f}")
-        print(f"{'STD':<6} | {stats[f'{prefix}_std_acc']:<10.2%} | "
-              f"{stats[f'{prefix}_std_f1']:<10.2f} | {'-':<10}")
-        print("-" * 50)
-    
-    def _print_comparison_table(self, stats):
-        """Print statistical comparison table"""
-        print("\n[ STATISTICAL ANALYSIS ]")
-        print("-" * 85)
-        print(f'{"Metric":<8} | {"Delta":<12} | {"Cohen\'s d":<10} | '
-              f'{"p-value":<10} | {"Significant?"}')
-        print("-" * 85)
-        
+            lines.append(f"{i+1:<6} | {data['acc'][i]:<10.2%} | "
+                         f"{data['f1'][i]:<10.2f} | {data['time'][i]:<10.4f}")
+            
+        lines.extend([
+            "-" * 50,
+            f"{'AVG':<6} | {stats[f'{prefix}_avg_acc']:<10.2%} | "
+            f"{stats[f'{prefix}_avg_f1']:<10.2f} | {stats[f'{prefix}_avg_time']:<10.4f}",
+            f"{'STD':<6} | {stats[f'{prefix}_std_acc']:<10.2%} | "
+            f"{stats[f'{prefix}_std_f1']:<10.2f} | {'-':<10}",
+            "-" * 50
+        ])
+        return "\n".join(lines)
+
+    def _build_comparison_table_string(self, stats):
+        """Builds and returns the statistical comparison table string"""
         sig_acc = "YES (*)" if stats['p_val_acc'] < 0.05 else "NO"
         sig_f1 = "YES (*)" if stats['p_val_f1'] < 0.05 else "NO"
         
-        print(f"{'Accuracy':<8} | {stats['delta_acc']:>+12.2%} | "
-              f"{stats['cohen_d_acc']:>10.2f} | {stats['p_val_acc']:>10.4f} | {sig_acc}")
-        print(f"{'F1 Score':<8} | {stats['delta_f1']:>+12.2%} | "
-              f"{stats['cohen_d_f1']:>10.2f} | {stats['p_val_f1']:>10.4f} | {sig_f1}")
-        print(f"{'Time':<8} | QSVM was {stats['time_ratio']:.0f}x slower")
-        print("-" * 85)
-        print()
+        lines = [
+            "\n[ STATISTICAL ANALYSIS ]",
+            "-" * 85,
+            f"{'Metric':<8} | {'Delta':<12} | {'Cohen\'s d':<10} | {'p-value':<10} | {'Significant?'}",
+            "-" * 85,
+            f"{'Accuracy':<8} | {stats['delta_acc']:>+12.2%} | {stats['cohen_d_acc']:>10.2f} | {stats['p_val_acc']:>10.4f} | {sig_acc}",
+            f"{'F1 Score':<8} | {stats['delta_f1']:>+12.2%} | {stats['cohen_d_f1']:>10.2f} | {stats['p_val_f1']:>10.4f} | {sig_f1}",
+            f"{'Time':<8} | QSVM was {stats['time_ratio']:.0f}x slower",
+            "-" * 85,
+            "\n"
+        ]
+        return "\n".join(lines)
+        
+    def _get_output_meta(self, config):
+        """Helper to dynamically generate the save directory and dataset display name"""
+        data_source = config.get('data_source')
+        
+        if data_source == ExperimentConfig.DATA_SOURCE_CSV:
+            dataset_name = self.data_manager.filename
+            base_folder = dataset_name.replace('.csv', '')
+        elif data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
+            dataset_name = "Sklearn Synthetic"
+            base_folder = "sklearn_synthetic"
+        elif data_source == ExperimentConfig.DATA_SOURCE_QISKIT:
+            dataset_name = "Qiskit Ad Hoc"
+            base_folder = "qiskit_adhoc"
+        else:
+            dataset_name = "Unknown Dataset"
+            base_folder = "unknown"
+            
+        folder_name = f"{base_folder}_{config['value_name']}"
+        safe_folder = folder_name.replace(' ', '_').lower()
+        
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        save_dir = os.path.join(parent_dir, "results", safe_folder)
+        
+        os.makedirs(save_dir, exist_ok=True)
+        
+        return save_dir, dataset_name
     
     def _store_results(self, value, stats):
-        """Store results for plotting"""
+        """Store results for plotting and CSV export"""
         self.results['x_values'].append(value)
         
         # Classical
@@ -743,5 +768,10 @@ class ExperimentRunner():
         # Comparisons
         self.results['delta_acc'].append(stats['delta_acc'])
         self.results['p_val_acc'].append(stats['p_val_acc'])
+        self.results['cohen_d_acc'].append(stats['cohen_d_acc'])
+        
         self.results['delta_f1'].append(stats['delta_f1'])
         self.results['p_val_f1'].append(stats['p_val_f1'])
+        self.results['cohen_d_f1'].append(stats['cohen_d_f1'])
+        
+        self.results['time_ratio'].append(stats['time_ratio'])
