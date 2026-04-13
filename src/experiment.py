@@ -504,7 +504,7 @@ class ExperimentRunner():
         
         # Calculate and display statistics
         self._process_results(
-            value, c_data, q_data, config
+            value, c_data, q_data
         )
     
     def _get_data_iterator(self, mode, value, config):
@@ -672,17 +672,20 @@ class ExperimentRunner():
     def _print_results_tables(self, c_data, q_data, stats):
         """Print formatted results tables"""
         # Table 1: Quantum performance
-        self._print_model_table("QUANTUM", q_data, stats, self.num_trials, is_quantum=True)
+        self._print_model_table("QUANTUM", q_data, stats)
         
         # Table 2: Classical performance
-        self._print_model_table("CLASSICAL", c_data, stats, self.num_trials, is_quantum=False)
+        self._print_model_table("CLASSICAL", c_data, stats)
         
         # Table 3: Statistical comparison
         self._print_comparison_table(stats)
     
-    def _print_model_table(self, model_name, data, stats, is_quantum):
+    def _print_model_table(self, model_name, data, stats):
         """Print performance table for one model"""
-        prefix = 'q' if is_quantum else 'c'
+        if model_name == "QUANTUM":
+            prefix = 'q'
+        else:
+            prefix = 'c'
         
         print(f"\n[ {model_name} MODEL PERFORMANCE ]")
         print("-" * 50)
