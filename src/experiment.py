@@ -158,6 +158,7 @@ class ExperimentRunner():
         self.num_dims = ExperimentConfig.NUM_DIMS
         self.num_trials = ExperimentConfig.NUM_TRIALS
         self.fixed_size = ExperimentConfig.FIXED_SIZE
+        self.config = None
         
         self.classical_clf = SVC(kernel='rbf')
         self.data_manager = None
@@ -172,16 +173,16 @@ class ExperimentRunner():
             filename: CSV filename (required for CSV modes)
             target_col: Target column (required for CSV modes)
         """
-        config = ExperimentConfig.get(mode)
+        self.config = ExperimentConfig.get(mode)
         
         # Validation
-        if config['requires_file'] and (filename is None or target_col is None):
+        if self.config['requires_file'] and (filename is None or target_col is None):
             raise ValueError(
                 f"Mode '{mode}' requires filename and target_col parameters"
             )
         
-        data_source = config['data_source']
-        sweep_values = config['sweep_values']
+        data_source = self.config['data_source']
+        sweep_values = self.config['sweep_values']
         
         if data_source == ExperimentConfig.DATA_SOURCE_CSV:
             print(f"Loading CSV dataset: {filename}")
@@ -204,7 +205,7 @@ class ExperimentRunner():
         elif data_source == ExperimentConfig.DATA_SOURCE_QISKIT:
             print(f"Generating Qiskit ad_hoc datasets for '{mode}' mode...")
             
-            fixed_dims = config['fixed_dims']
+            fixed_dims = self.config['fixed_dims']
             print(f"Note: ad_hoc_data works best with {fixed_dims} dimensions.")
             print(f"Generating dataset with {fixed_dims} dimensions.")
                 
@@ -273,10 +274,8 @@ class ExperimentRunner():
         
         # Resets and clears stored results
         self.clear_results()
-           
-        config = ExperimentConfig.get(mode)
         
-        sweep_values = config['sweep_values']
+        sweep_values = self.config['sweep_values']
         
         # Phase 1: Tune hyperparameters  
         c_params, q_params = self._tune_hyperparameters(mode)
@@ -299,15 +298,14 @@ class ExperimentRunner():
             self._run_trials_for_value(
                 mode=mode,
                 value=value,
-                config=config,
                 c_params=c_params,
                 q_params=q_params,
                 shared_kernel=shared_kernel
             )
         
         # Phase 4: Plot results after all values complete
-        self.plot_results(config)
-        save_dir, _ = self._get_output_meta(config)
+        self.plot_results(self.config)
+        save_dir, _ = self._get_output_meta(self.config)
         
         df = pd.DataFrame(self.results)
         df.to_csv(os.path.join(save_dir, 'summary_metrics.csv'), index=False)
@@ -421,9 +419,8 @@ class ExperimentRunner():
     
     def _get_baseline_split(self, mode):
         """Get train/val split from baseline dataset"""
-        config = ExperimentConfig.get(mode)
-        sweep_values = config['sweep_values']
-        data_source = config['data_source']
+        sweep_values = self.config['sweep_values']
+        data_source = self.config['data_source']
         
         if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
             # Use middle value as baseline
@@ -456,27 +453,26 @@ class ExperimentRunner():
         
         return kernel
 
-    def _run_trials_for_value(self, mode, value, config, c_params, q_params, shared_kernel):
+    def _run_trials_for_value(self, mode, value, c_params, q_params, shared_kernel):
         """Run all trials for a single sweep value"""
         print(f"\n{'-'*80}")
-        print(f"RUNNING: {config['value_name']} = {value}")
+        print(f"RUNNING: {self.config['value_name']} = {value}")
         print(f"{'-'*80}")
         
         # Get data iterator
-        data_iterator = self._get_data_iterator(mode, value, config)
+        data_iterator = self._get_data_iterator(mode, value)
         
         # Run trials and collect results
-        c_data, q_data = self._run_trials(mode, data_iterator, c_params, q_params, shared_kernel)
+        c_data, q_data = self._run_trials(data_iterator, c_params, q_params, shared_kernel)
         
         # Calculate and display statistics
         self._process_results(
             value, c_data, q_data, mode
         )
     
-    def _get_data_iterator(self, mode, value, config):
+    def _get_data_iterator(self, mode, value):
         """Get appropriate data iterator based on mode"""
-        config = ExperimentConfig.get(mode)
-        data_source = config['data_source']
+        data_source = self.config['data_source']
         
         if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
             return self._get_kfold_iterator(mode, value)
@@ -513,13 +509,12 @@ class ExperimentRunner():
             
             yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
     
-    def _run_trials(self, mode, data_iterator, c_params, q_params, shared_kernel):
+    def _run_trials(self, data_iterator, c_params, q_params, shared_kernel):
         """Execute all trials and collect results"""
         c_data = {'acc': [], 'f1': [], 'time': []}
         q_data = {'acc': [], 'f1': [], 'time': []}
         
-        config = ExperimentConfig.get(mode)
-        is_kfold = config['data_source'] == ExperimentConfig.DATA_SOURCE_SKLEARN
+        is_kfold = self.config['data_source'] == ExperimentConfig.DATA_SOURCE_SKLEARN
         
         label_type = "Fold" if is_kfold else "Trial"
         
@@ -552,7 +547,7 @@ class ExperimentRunner():
         stats = self._calculate_statistics(c_data, q_data)
         
         # Print performance tables
-        self._print_results_tables(value, c_data, q_data, stats, mode)
+        self._print_results_tables(value, c_data, q_data, stats)
         
         # Store for plotting
         self._store_results(value, stats)
@@ -635,14 +630,13 @@ class ExperimentRunner():
         p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
         return p_val
     
-    def _print_results_tables(self, value, c_data, q_data, stats, mode):
+    def _print_results_tables(self, value, c_data, q_data, stats):
         """Generate formatted tables, print to console, and append to log file"""
-        config = ExperimentConfig.get(mode)
         
         # 1. Build the text report as a list of strings
         report = []
         report.append(f"\n{'='*85}")
-        report.append(f"RESULTS FOR {config['value_name'].upper()}: {value}")
+        report.append(f"RESULTS FOR {self.config['value_name'].upper()}: {value}")
         report.append(f"{'='*85}")
         
         report.append(self._build_model_table_string("QUANTUM", q_data, stats))
@@ -656,7 +650,7 @@ class ExperimentRunner():
         print(full_report)
         
         # 3. Unpack the tuple to safely get JUST the directory path
-        save_dir, _ = self._get_output_meta(config)
+        save_dir, _ = self._get_output_meta(self.config)
         log_file = os.path.join(save_dir, 'detailed_report.txt')
         
         # 4. Append to detailed_report.txt in your results folder
@@ -705,9 +699,9 @@ class ExperimentRunner():
         ]
         return "\n".join(lines)
         
-    def _get_output_meta(self, config):
+    def _get_output_meta(self):
         """Helper to dynamically generate the save directory and dataset display name"""
-        data_source = config.get('data_source')
+        data_source = self.config['data_source']
         
         if data_source == ExperimentConfig.DATA_SOURCE_CSV:
             dataset_name = self.data_manager.filename
@@ -722,7 +716,7 @@ class ExperimentRunner():
             dataset_name = "Unknown Dataset"
             base_folder = "unknown"
             
-        folder_name = f"{base_folder}_{config['value_name']}"
+        folder_name = f"{base_folder}_{self.config['value_name']}"
         safe_folder = folder_name.replace(' ', '_').lower()
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
