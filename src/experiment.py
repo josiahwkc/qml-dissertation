@@ -633,7 +633,7 @@ class ExperimentRunner():
     def _print_results_tables(self, value, c_data, q_data, stats):
         """Generate formatted tables, print to console, and append to log file"""
         
-        # 1. Build the text report as a list of strings
+        # Build the text report as a list of strings
         report = []
         report.append(f"\n{'='*85}")
         report.append(f"RESULTS FOR {self.config['value_name'].upper()}: {value}")
@@ -646,14 +646,14 @@ class ExperimentRunner():
         # Combine list into a single massive string
         full_report = "\n".join(report)
         
-        # 2. Print to console for real-time monitoring
+        # Print to console for real-time monitoring
         print(full_report)
         
-        # 3. Unpack the tuple to safely get JUST the directory path
+        # Unpack the tuple to safely get JUST the directory path
         save_dir, _ = self._get_output_meta(self.config)
         log_file = os.path.join(save_dir, 'detailed_report.txt')
         
-        # 4. Append to detailed_report.txt in your results folder
+        # Append to detailed_report.txt in your results folder
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(full_report + "\n")
 
