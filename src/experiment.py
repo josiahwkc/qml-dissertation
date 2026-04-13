@@ -16,8 +16,6 @@ Attribution:
   - Original URL: https://github.com/Qiskit/platypus/blob/main/notebooks/summer-school/2021/resources/lab-notebooks/lab-3.ipynb
 """
 
-# %%
-# Imports
 import os
 import time
 import warnings
@@ -35,8 +33,6 @@ from qiskit.circuit.library import ZZFeatureMap
 from qiskit_machine_learning.kernels import FidelityQuantumKernel
 from feature_map_factory import FeatureMapFactory
 
-# %%
-# Experiment Class
 class ExperimentConfig:
     """Configuration for experiment modes with explicit data source types"""
     
@@ -316,8 +312,6 @@ class ExperimentRunner():
                 mode=mode,
                 value=value,
                 config=config,
-                num_trials=self.num_trials,
-                fixed_size=self.fixed_size,
                 c_params=c_params,
                 q_params=q_params,
                 shared_kernel=shared_kernel
@@ -496,27 +490,21 @@ class ExperimentRunner():
         
         return kernel
 
-    def _run_trials_for_value(self, mode, value, config, num_trials, 
-                              fixed_size, c_params, q_params, shared_kernel):
+    def _run_trials_for_value(self, mode, value, config, c_params, q_params, shared_kernel):
         """Run all trials for a single sweep value"""
         print(f"\n{'-'*80}")
         print(f"RUNNING: {config['value_name']} = {value}")
         print(f"{'-'*80}")
         
         # Get data iterator
-        data_iterator = self._get_data_iterator(
-            mode, value, config, num_trials, fixed_size
-        )
+        data_iterator = self._get_data_iterator(mode, value, config)
         
         # Run trials and collect results
-        c_data, q_data = self._run_trials(
-            data_iterator, num_trials,
-            c_params, q_params, shared_kernel
-        )
+        c_data, q_data = self._run_trials(mode, data_iterator, c_params, q_params, shared_kernel)
         
         # Calculate and display statistics
         self._process_results(
-            value, c_data, q_data, num_trials, config
+            value, c_data, q_data, config
         )
     
     def _get_data_iterator(self, mode, value, config):
@@ -525,30 +513,28 @@ class ExperimentRunner():
         data_source = config['data_source']
         
         if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
-            return self._get_kfold_iterator(mode, value, self.num_trials)
+            return self._get_kfold_iterator(mode, value)
         else:
-            return self._get_monte_carlo_iterator(
-                mode, value, self.num_trials, self.fixed_size
-            )
+            return self._get_monte_carlo_iterator(mode, value)
     
-    def _get_kfold_iterator(self, mode, value, num_trials):
+    def _get_kfold_iterator(self, mode, value):
         """K-fold cross-validation iterator for synthetic data"""
-        print(f"Executing {num_trials}-Fold Cross Validation...")
+        print(f"Executing {self.num_trials}-Fold Cross Validation...")
         
         label = f"{mode}_{value}"
         
-        for idx, splits in enumerate(self.data_manager.get_kfold_splits(k_folds=num_trials, seed=42, label=label)):
+        for idx, splits in enumerate(self.data_manager.get_kfold_splits(k_folds=self.num_trials, seed=42, label=label)):
             yield idx, splits
     
-    def _get_monte_carlo_iterator(self, mode, value, num_trials, fixed_size):
+    def _get_monte_carlo_iterator(self, mode, value):
         """Monte Carlo random sub-sampling for CSV data"""
-        print(f"Executing Monte Carlo Sub-Sampling ({num_trials} trials)...")
+        print(f"Executing Monte Carlo Sub-Sampling ({self.num_trials} trials)...")
         
-        for trial in range(num_trials):
+        for trial in range(self.num_trials):
             X_pool, X_val, X_test, y_pool, y_val, y_test = \
                 self.data_manager.get_data_split(seed=trial)
             
-            train_size = value if mode in ['size', 'quantum_benchmark'] else fixed_size
+            train_size = value if mode in ['size', 'quantum_benchmark'] else self.fixed_size
             imbalance = value if mode == 'imbalance' else 0.5
             
             X_train, y_train = TrainingSampler.create_class_imbalance(
@@ -561,11 +547,13 @@ class ExperimentRunner():
             
             yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
     
-    def _run_trials(self, data_iterator, is_kfold, 
-                   c_params, q_params, shared_kernel):
+    def _run_trials(self, mode, data_iterator, c_params, q_params, shared_kernel):
         """Execute all trials and collect results"""
         c_data = {'acc': [], 'f1': [], 'time': []}
         q_data = {'acc': [], 'f1': [], 'time': []}
+        
+        config = ExperimentConfig.get(mode)
+        is_kfold = config['data_source'] == ExperimentConfig.DATA_SOURCE_SKLEARN
         
         label_type = "Fold" if is_kfold else "Trial"
         
@@ -592,13 +580,13 @@ class ExperimentRunner():
         
         return c_data, q_data
 
-    def _process_results(self, value, c_data, q_data, num_trials, config):
+    def _process_results(self, value, c_data, q_data):
         """Calculate statistics, print tables, and store results"""
         # Calculate statistics
         stats = self._calculate_statistics(c_data, q_data)
         
         # Print performance tables
-        self._print_results_tables(c_data, q_data, stats, num_trials)
+        self._print_results_tables(c_data, q_data, stats)
         
         # Store for plotting
         self._store_results(value, stats)
@@ -681,18 +669,18 @@ class ExperimentRunner():
         p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
         return p_val
     
-    def _print_results_tables(self, c_data, q_data, stats, num_trials):
+    def _print_results_tables(self, c_data, q_data, stats):
         """Print formatted results tables"""
         # Table 1: Quantum performance
-        self._print_model_table("QUANTUM", q_data, stats, num_trials, is_quantum=True)
+        self._print_model_table("QUANTUM", q_data, stats, self.num_trials, is_quantum=True)
         
         # Table 2: Classical performance
-        self._print_model_table("CLASSICAL", c_data, stats, num_trials, is_quantum=False)
+        self._print_model_table("CLASSICAL", c_data, stats, self.num_trials, is_quantum=False)
         
         # Table 3: Statistical comparison
         self._print_comparison_table(stats)
     
-    def _print_model_table(self, model_name, data, stats, num_trials, is_quantum):
+    def _print_model_table(self, model_name, data, stats, is_quantum):
         """Print performance table for one model"""
         prefix = 'q' if is_quantum else 'c'
         
@@ -701,7 +689,7 @@ class ExperimentRunner():
         print(f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}")
         print("-" * 50)
         
-        for i in range(num_trials):
+        for i in range(self.num_trials):
             print(f"{i+1:<6} | {data['acc'][i]:<10.2%} | "
                   f"{data['f1'][i]:<10.2f} | {data['time'][i]:<10.4f}")
         
@@ -754,7 +742,3 @@ class ExperimentRunner():
         self.results['p_val_acc'].append(stats['p_val_acc'])
         self.results['delta_f1'].append(stats['delta_f1'])
         self.results['p_val_f1'].append(stats['p_val_f1'])
-
-
-
-# %%
