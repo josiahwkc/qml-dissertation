@@ -58,7 +58,7 @@ class TrainingSampler():
         return X_train, y_train
 
 
-class AdhocDataManager():
+class QuantumBenchmarkDataManager():
     """Generates synthetic data using Qiskit's ad_hoc_data"""
     
     def __init__(self):
@@ -77,12 +77,13 @@ class AdhocDataManager():
             pool_size: Size of training pool for sampling
             test_size: Size of fixed test set
         """
-        self.num_dims = num_dims
+        per_class_train = pool_size // 2
+        per_class_test = test_size // 2
         
         # Generate data pool + fixed test set
         X_pool, y_pool, X_test, y_test = ad_hoc_data(
-            training_size=pool_size,
-            test_size=test_size,
+            training_size=per_class_train,
+            test_size=per_class_test,
             n=num_dims,
             gap=gap,
             plot_data=True
@@ -95,24 +96,14 @@ class AdhocDataManager():
         self.y_test_fixed = np.argmax(y_test, axis=1)
     
     def get_data_split(self, seed):
-        """Create train/test/validation split with preprocessing"""
+        """Create train/test/validation split"""
         
         # Split into 80% (of 800) train and 20% (of 200) validation
         X_train, X_val, y_train, y_val = train_test_split(
             self.X_pool, self.y_pool, test_size=0.2, random_state=seed, stratify=self.y_pool
         )
         
-        # Preprocessing
-        preprocessing_pipeline = Pipeline([
-            ('std_scaler', StandardScaler()), 
-            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
-        ])
-        
-        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
-        X_test_processed = preprocessing_pipeline.transform(self.X_test_fixed)
-        X_val_processed = preprocessing_pipeline.transform(X_val)
-        
-        return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, self.y_test_fixed
+        return X_train, X_val, self.X_test_fixed, y_train, y_val, self.y_test_fixed
 
 
 class CSVDataManager():
