@@ -27,7 +27,7 @@ from scipy import stats
 from sklearn.svm import SVC
 from sklearn import metrics
 
-from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager, TrainingSampler
+from data_manager import CSVDataManager, QuantumBenchmarkDataManager, SyntheticDataManager, TrainingSampler
 from tuner import ClassicalSVMTuner, QuantumSVMTuner
 
 # Quantum Imports
@@ -38,78 +38,198 @@ from feature_map_factory import FeatureMapFactory
 # %%
 # Experiment Class
 class ExperimentConfig:
-    """Configuration for experiment modes"""
+    """Configuration for experiment modes with explicit data source types"""
+    
+    NUM_DIMS = 5          # Number of PCA dimensions (and Qubits)
+    NUM_TRIALS = 10 #30   # Number of random seeds to average over
+    N_CLASS = 2           # Binary classification
+    FIXED_SIZE = 100      # Default training size for non-'size' experiments
+    
+    # Define data source types
+    DATA_SOURCE_CSV = 'csv'
+    DATA_SOURCE_SKLEARN = 'sklearn'
+    DATA_SOURCE_QISKIT = 'qiskit'
     
     MODES = {
+        # =====================================================================
+        # CSV DATA MODES (Real datasets)
+        # =====================================================================
         'size': {
             'x_label': 'Training Samples',
             'title_suffix': 'vs Training Size',
             'value_name': 'Training Size',
-            'is_synthetic': False
+            'data_source': DATA_SOURCE_CSV,
+            'requires_file': True,
+            'sweep_values': [10, 50, 100, 150, 200, 250, 300],
+            'description': 'Vary training set size on real data'
         },
         'imbalance': {
             'x_label': 'Class Imbalance Ratio',
             'title_suffix': 'vs Class Imbalance',
             'value_name': 'Ratio',
-            'is_synthetic': False
+            'data_source': DATA_SOURCE_CSV,
+            'requires_file': True,
+            'sweep_values': True,
+            'description': 'Vary class imbalance ratio on real data'
         },
+        
+        # =====================================================================
+        # SKLEARN SYNTHETIC MODES (make_classification)
+        # =====================================================================
         'feature_complexity': {
             'x_label': 'Informative Features',
             'title_suffix': 'vs Feature Complexity',
             'value_name': 'Informative Features',
-            'is_synthetic': True
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [1, 2, 3, 4, 5],
+            'sweep_parameter': 'n_informative',
+            'description': 'Vary number of informative features in synthetic data'
         },
         'margin': {
             'x_label': 'Class Separation',
             'title_suffix': 'vs Margin',
             'value_name': 'Class Separation',
-            'is_synthetic': True
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [0.1, 0.5, 1.0, 1.5, 2.0],
+            'sweep_parameter': 'class_sep',
+            'description': 'Vary class separation margin in synthetic data'
         },
         'clusters': {
             'x_label': 'Clusters per Class',
             'title_suffix': 'vs Clusters',
             'value_name': 'Clusters/Class',
-            'is_synthetic': True
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [1, 2, 3, 4],
+            'sweep_parameter': 'n_clusters_per_class',
+            'description': 'Vary decision boundary complexity via clusters'
         },
         'noise': {
             'x_label': 'Label Noise',
             'title_suffix': 'vs Noise',
             'value_name': 'Noise Fraction',
-            'is_synthetic': True
-        }
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [0.0, 0.05, 0.10, 0.15, 0.20],
+            'sweep_parameter': 'flip_y',
+            'description': 'Vary label noise in synthetic data'
+        },
+        
+        # =====================================================================
+        # QISKIT SYNTHETIC MODE (ad_hoc_data)
+        # =====================================================================
+        'quantum_benchmark': {
+            'x_label': 'Training Samples',
+            'title_suffix': 'vs Training Size',
+            'value_name': 'Training Size',
+            'data_source': DATA_SOURCE_QISKIT,
+            'requires_file': False,
+            'sweep_values': [10, 50, 100],
+            'sweep_parameter': 'gap',
+            'description': 'Qiskit ad_hoc_data optimized for ZZFeatureMap',
+            'fixed_dims': 2,  # ad_hoc_data only allows 2 or 3 dimensions
+        },
     }
     
     @classmethod
     def get(cls, mode):
-        """Get configuration for a mode"""
+        """
+        Get configuration for a mode.
+        
+        Args:
+            mode: Experiment mode name
+            
+        Returns:
+            dict: Configuration dictionary
+            
+        Raises:
+            ValueError: If mode is invalid
+        """
         if mode not in cls.MODES:
-            raise ValueError(f"Invalid mode: {mode}")
+            available = ', '.join(cls.MODES.keys())
+            raise ValueError(
+                f"Invalid mode: '{mode}'. Available modes: {available}"
+            )
         return cls.MODES[mode]
 
 
 class ExperimentRunner():
-    def __init__(self, quantum_provider, sweep_values_dict, num_dims, num_trials, fixed_size):
+    def __init__(self, quantum_provider):
         self.qp = quantum_provider
-        self.num_dims = num_dims
-        self.num_trials = num_trials
-        self.sweep_values_dict = sweep_values_dict
-        self.fixed_size = fixed_size
+        self.num_dims = ExperimentConfig.NUM_DIMS
+        self.num_trials = ExperimentConfig.NUM_TRIALS
+        self.fixed_size = ExperimentConfig.FIXED_SIZE
         
         self.classical_clf = SVC(kernel='rbf')
         self.data_manager = None
         self.clear_results()
-    
-    def initialise_datasets(self, mode=None, filename=None, target_col=None):
-        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
-            self.data_manager = SyntheticDataManager()
-            self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, sweep_values=self.sweep_values_dict[mode])
         
-        elif mode in ['size', 'imbalance']:
+    def initialise_datasets(self, mode, filename=None, target_col=None):
+        """
+        Initialize datasets based on mode's data source.
+        
+        Args:
+            mode: Experiment mode
+            filename: CSV filename (required for CSV modes)
+            target_col: Target column (required for CSV modes)
+        """
+        config = ExperimentConfig.get(mode)
+        
+        # Validation
+        if config['requires_file'] and (filename is None or target_col is None):
+            raise ValueError(
+                f"Mode '{mode}' requires filename and target_col parameters"
+            )
+        
+        data_source = config['data_source']
+        sweep_values = config['sweep_values']
+        
+        if data_source == ExperimentConfig.DATA_SOURCE_CSV:
+            print(f"Loading CSV dataset: {filename}")
             self.data_manager = CSVDataManager()
-            self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=self.num_dims)
+            self.data_manager.load_dataset(
+                filename=filename,
+                target_col=target_col,
+                num_dims=self.num_dims
+            )
+        
+        elif data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
+            print(f"Generating sklearn synthetic datasets for '{mode}' mode...")
+            self.data_manager = SyntheticDataManager()
+            self.data_manager.initialise_datasets(
+                num_dims=self.num_dims,
+                mode=mode,
+                sweep_values=sweep_values
+            )
+        
+        elif data_source == ExperimentConfig.DATA_SOURCE_QISKIT:
+            print(f"Generating Qiskit ad_hoc datasets for '{mode}' mode...")
+            
+            fixed_dims = config['fixed_dims']
+            print(f"Note: ad_hoc_data works best with {fixed_dims} dimensions.")
+            print(f"Generating dataset with {fixed_dims} dimensions.")
+                
+            self.data_manager = QuantumBenchmarkDataManager()
+            self.data_manager.create_dataset()
         
         else:
-            raise ValueError(f"Invalid mode: {mode}")
+            raise ValueError(f"Unknown data source: {data_source}")
+        
+    # def initialise_datasets(self, mode=None, filename=None, target_col=None):
+    #     if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
+    #         self.data_manager = SyntheticDataManager()
+    #         self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, sweep_values=self.sweep_values_dict[mode])
+    #     elif mode == 'quantum_benchmark':
+    #         self.data_manager = QuantumBenchmarkDataManager()
+    #         self.data_manager.create_dataset()
+    #     elif mode in ['size', 'imbalance']:
+    #         self.data_manager = CSVDataManager()
+    #         self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=self.num_dims)
+        
+    #     else:
+    #         raise ValueError(f"Invalid mode: {mode}")
     
     def clear_results(self):
         self.results = {
@@ -172,10 +292,10 @@ class ExperimentRunner():
            
         config = ExperimentConfig.get(mode)
         
-        sweep_values = self.sweep_values_dict[mode]
+        sweep_values = config['sweep_values']
         
         # Phase 1: Tune hyperparameters  
-        c_params, q_params = self._tune_hyperparameters(mode, sweep_values)
+        c_params, q_params = self._tune_hyperparameters(mode)
 
         # Phase 2: Build quantum kernel once
         # shared_kernel = self._build_quantum_kernel(q_params)
@@ -204,23 +324,36 @@ class ExperimentRunner():
             )
         
         # Phase 4: Plot results after all values complete
-        self.plot_results(config['is_synthetic'], config['x_label'], config['title_suffix'], config['value_name'])
+        self.plot_results(config)
     
-    def plot_results(self, is_synthetic, x_label, title_suffix, value_name):
+    def plot_results(self, config):
         """Generate, save, and display individual comparison plots"""
         
-        # 1. Determine the base name based on your condition
-        if is_synthetic:
-            base_name = "synthetic"
-        else:
-            # Grab the filename from the data manager and strip the .csv extension
-            base_name = self.data_manager.filename.replace('.csv', '')
+        data_source = config['data_source']
+        
+        # Determine the base name based on your condition
+        match(data_source):
+            case ExperimentConfig.DATA_SOURCE_CSV:
+                dataset_name = self.data_manager.filename
+                base_folder = dataset_name.replace('.csv', '')
+                
+            case ExperimentConfig.DATA_SOURCE_SKLEARN:
+                dataset_name = "Sklearn Synthetic"
+                base_folder = "sklearn_synthetic"     
+
+            case ExperimentConfig.DATA_SOURCE_QISKIT:
+                dataset_name = "Qiskit Ad Hoc"
+                base_folder = "qiskit_adhoc"
+                
+            case _:
+                dataset_name = "Unknown Dataset"
+                base_folder = "unknown"
             
-        # 2. Format the folder name safely
-        folder_name = f"{base_name}_{value_name}"
+        # Format the folder name safely
+        folder_name = f"{base_folder}_{config['value_name']}"
         safe_folder = folder_name.replace(' ', '_').lower()
         
-        # 3. Get directories and create the save path
+        # Get directories and create the save path
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
         save_dir = os.path.join(parent_dir, "results", safe_folder)
@@ -230,7 +363,10 @@ class ExperimentRunner():
         print(f"\nSaving plots to: {save_dir}/")
         
         
-        # Accuracy Plot
+        x_label = config['x_label']
+        title_suffix = config['title_suffix']
+        
+        # 1. Accuracy Plot
         plt.figure(figsize=(8, 6))
         plt.errorbar(self.results['x_values'], self.results['c_acc'], 
                      yerr=self.results['c_acc_std'], fmt='o-', capsize=5, 
@@ -239,18 +375,17 @@ class ExperimentRunner():
                      yerr=self.results['q_acc_std'], fmt='s-', capsize=5, 
                      label='Quantum', color='purple')
         
-        plt.title(f'Accuracy {title_suffix}')
+        plt.title(f'Accuracy {title_suffix} ({dataset_name})')
         plt.xlabel(x_label)
         plt.ylabel('Accuracy')
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
         
-        # Save and show
         plt.savefig(os.path.join(save_dir, 'accuracy.png'), dpi=300)
         plt.show()
         
-        # F1 Score Plot
+        # 2. F1 Score Plot
         plt.figure(figsize=(8, 6))
         plt.errorbar(self.results['x_values'], self.results['c_f1'], 
                      yerr=self.results['c_f1_std'], fmt='o-', capsize=5, 
@@ -259,25 +394,24 @@ class ExperimentRunner():
                      yerr=self.results['q_f1_std'], fmt='s-', capsize=5, 
                      label='Quantum', color='purple')
         
-        plt.title(f'F1 Score {title_suffix}')
+        plt.title(f'F1 Score {title_suffix} ({dataset_name})')
         plt.xlabel(x_label)
         plt.ylabel('F1 Score')
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
         
-        # Save and show
         plt.savefig(os.path.join(save_dir, 'f1_score.png'), dpi=300)
         plt.show()
         
-        # Training Time Plot
+        # 3. Training Time Plot
         plt.figure(figsize=(8, 6))
         plt.plot(self.results['x_values'], self.results['c_time'], 
                  'o-', label='Classical', color='blue')
         plt.plot(self.results['x_values'], self.results['q_time'], 
                  's-', label='Quantum', color='purple')
         
-        plt.title(f'Training Time {title_suffix}')
+        plt.title(f'Training Time {title_suffix} ({dataset_name})')
         plt.yscale('log')
         plt.xlabel(x_label)
         plt.ylabel('Time (s)')
@@ -285,11 +419,10 @@ class ExperimentRunner():
         plt.grid(True)
         plt.tight_layout()
         
-        # Save and show
         plt.savefig(os.path.join(save_dir, 'training_time.png'), dpi=300)
         plt.show()
         
-    def _tune_hyperparameters(self, mode, sweep_values):
+    def _tune_hyperparameters(self, mode):
         """
         Tune hyperparameters on baseline dataset.
         
@@ -301,7 +434,7 @@ class ExperimentRunner():
         print("="*80)
         
         # Get baseline dataset
-        X_train, X_val, y_train, y_val = self._get_baseline_split(mode, sweep_values)
+        X_train, X_val, y_train, y_val = self._get_baseline_split(mode)
         
         print(f"  Tuning set: Train={len(y_train)}, Val={len(y_val)}")
         
@@ -326,11 +459,13 @@ class ExperimentRunner():
         
         return c_params, q_params
     
-    def _get_baseline_split(self, mode, sweep_values):
+    def _get_baseline_split(self, mode):
         """Get train/val split from baseline dataset"""
         config = ExperimentConfig.get(mode)
+        sweep_values = config['sweep_values']
+        data_source = config['data_source']
         
-        if config['is_synthetic']:
+        if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
             # Use middle value as baseline
             baseline_value = sweep_values[len(sweep_values) // 2]
             label = f"{mode}_{baseline_value}"
@@ -375,7 +510,7 @@ class ExperimentRunner():
         
         # Run trials and collect results
         c_data, q_data = self._run_trials(
-            data_iterator, num_trials, config['is_synthetic'],
+            data_iterator, num_trials,
             c_params, q_params, shared_kernel
         )
         
@@ -384,13 +519,16 @@ class ExperimentRunner():
             value, c_data, q_data, num_trials, config
         )
     
-    def _get_data_iterator(self, mode, value, config, num_trials, fixed_size):
+    def _get_data_iterator(self, mode, value, config):
         """Get appropriate data iterator based on mode"""
-        if config['is_synthetic']:
-            return self._get_kfold_iterator(mode, value, num_trials)
+        config = ExperimentConfig.get(mode)
+        data_source = config['data_source']
+        
+        if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
+            return self._get_kfold_iterator(mode, value, self.num_trials)
         else:
             return self._get_monte_carlo_iterator(
-                mode, value, num_trials, fixed_size
+                mode, value, self.num_trials, self.fixed_size
             )
     
     def _get_kfold_iterator(self, mode, value, num_trials):
@@ -410,7 +548,7 @@ class ExperimentRunner():
             X_pool, X_val, X_test, y_pool, y_val, y_test = \
                 self.data_manager.get_data_split(seed=trial)
             
-            train_size = value if mode == 'size' else fixed_size
+            train_size = value if mode in ['size', 'quantum_benchmark'] else fixed_size
             imbalance = value if mode == 'imbalance' else 0.5
             
             X_train, y_train = TrainingSampler.create_class_imbalance(
@@ -423,7 +561,7 @@ class ExperimentRunner():
             
             yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
     
-    def _run_trials(self, data_iterator, num_trials, is_kfold, 
+    def _run_trials(self, data_iterator, is_kfold, 
                    c_params, q_params, shared_kernel):
         """Execute all trials and collect results"""
         c_data = {'acc': [], 'f1': [], 'time': []}
@@ -432,7 +570,7 @@ class ExperimentRunner():
         label_type = "Fold" if is_kfold else "Trial"
         
         for idx, (X_train, _, X_test, y_train, _, y_test) in data_iterator:
-            print(f"\n{label_type} {idx+1}/{num_trials} "
+            print(f"\n{label_type} {idx+1}/{self.num_trials} "
                   f"(Train: {len(X_train)}, Test: {len(X_test)})...")
             
             # Run classical
