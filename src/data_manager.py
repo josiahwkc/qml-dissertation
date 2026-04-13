@@ -19,8 +19,7 @@ Key Features:
   - Reproducible splits via random seeds
 """
 
-# %%
-# Imports
+
 import pandas as pd
 from pathlib import Path
 import numpy as np
@@ -442,4 +441,3 @@ class SyntheticDataManager():
         X_val_processed = preprocessing_pipeline.transform(X_val)
         
         return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
-# %%
