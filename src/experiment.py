@@ -213,20 +213,6 @@ class ExperimentRunner():
         
         else:
             raise ValueError(f"Unknown data source: {data_source}")
-        
-    # def initialise_datasets(self, mode=None, filename=None, target_col=None):
-    #     if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
-    #         self.data_manager = SyntheticDataManager()
-    #         self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, sweep_values=self.sweep_values_dict[mode])
-    #     elif mode == 'quantum_benchmark':
-    #         self.data_manager = QuantumBenchmarkDataManager()
-    #         self.data_manager.create_dataset()
-    #     elif mode in ['size', 'imbalance']:
-    #         self.data_manager = CSVDataManager()
-    #         self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=self.num_dims)
-        
-    #     else:
-    #         raise ValueError(f"Invalid mode: {mode}")
     
     def clear_results(self):
         self.results = {
