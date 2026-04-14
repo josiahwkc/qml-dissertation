@@ -1,5 +1,9 @@
 import pytest
 import numpy as np
+import pandas as pd
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
 
 from data_manager import TrainingSampler, CSVDataManager, SyntheticDataManager, QuantumBenchmarkDataManager
 from helpers import make_binary_data, split
@@ -77,16 +81,10 @@ class TestTrainingSampler:
         np.testing.assert_array_equal(y1, y2)
 
 
-# ===========================================================================
-# SyntheticDataManager
-# ===========================================================================
-
 class TestSyntheticDataManager:
 
     def setup_method(self):
         self.dm = SyntheticDataManager()
-
-    # -- create_dataset -------------------------------------------------------
 
     def test_create_dataset_stores_data(self):
         X, y = self.dm.create_dataset(label="test", num_dims=4, n_samples=50)
@@ -119,8 +117,6 @@ class TestSyntheticDataManager:
         out = capsys.readouterr().out
         assert "Warning" in out or "dup" in out
 
-    # -- initialise_datasets --------------------------------------------------
-
     def test_initialise_datasets_creates_correct_count(self):
         sweep = [1, 2, 3]
         self.dm.initialise_datasets(
@@ -140,8 +136,6 @@ class TestSyntheticDataManager:
             self.dm.initialise_datasets(
                 mode="INVALID_MODE", num_dims=4, sweep_values=[1]
             )
-
-    # -- get_data_split -------------------------------------------------------
 
     def test_get_data_split_returns_six_arrays(self):
         self.dm.create_dataset(label="split", num_dims=4, n_samples=100)
@@ -180,8 +174,6 @@ class TestSyntheticDataManager:
         assert X_tr.min() >= -1e-6
         assert X_tr.max() <= 1 + 1e-6
 
-    # -- get_kfold_splits -----------------------------------------------------
-
     def test_get_kfold_splits_yields_correct_number_of_folds(self):
         self.dm.create_dataset(label="kfold", num_dims=4, n_samples=200)
         folds = list(self.dm.get_kfold_splits(seed=0, label="kfold", k_folds=5))
@@ -209,3 +201,108 @@ class TestSyntheticDataManager:
         first_test_size = folds[0][2].shape[0]
         for fold in folds[1:]:
             assert fold[2].shape[0] == first_test_size
+            
+class TestQuantumBenchmarkDataManager:
+
+    def setup_method(self):
+        """Initialize a fresh instance of the manager before each test."""
+        self.dm = QuantumBenchmarkDataManager()
+
+    def test_initialization(self):
+        """Ensure all data attributes start as None."""
+        assert self.dm.X_pool is None
+        assert self.dm.y_pool is None
+        assert self.dm.X_test_fixed is None
+        assert self.dm.y_test_fixed is None
+
+    @patch('data_manager.ad_hoc_data') 
+    def test_create_dataset_calls_ad_hoc_with_halved_sizes(self, mock_ad_hoc):
+        """Test that pool_size and test_size are correctly halved per class to prevent inflation."""
+        
+        # Setup the mock to return dummy arrays just to prevent unpacking errors
+        mock_ad_hoc.return_value = (
+            np.zeros((800, 2)), np.zeros((800, 2)), 
+            np.zeros((200, 2)), np.zeros((200, 2))
+        )
+        
+        # Call with total sizes
+        self.dm.create_dataset(num_dims=2, gap=0.3, pool_size=800, test_size=200)
+        
+        # Verify the math! 800 total -> 400 per class, 200 total -> 100 per class
+        mock_ad_hoc.assert_called_once_with(
+            training_size=400,
+            test_size=100,
+            n=2,
+            gap=0.3,
+            plot_data=True
+        )
+
+    @patch('data_manager.ad_hoc_data')
+    def test_create_dataset_converts_one_hot_labels(self, mock_ad_hoc):
+        """Test that one-hot labels from Qiskit are properly converted to 1D arrays."""
+        
+        # Create dummy features
+        dummy_X_pool = np.random.rand(4, 2)
+        dummy_X_test = np.random.rand(2, 2)
+        
+        # Create specific one-hot labels to test the argmax conversion
+        # Class 0: [1, 0], Class 1: [0, 1]
+        dummy_y_pool_onehot = np.array([[1, 0], [0, 1], [1, 0], [0, 1]]) 
+        dummy_y_test_onehot = np.array([[0, 1], [1, 0]])
+        
+        # Inject the dummy data into the mock
+        mock_ad_hoc.return_value = (
+            dummy_X_pool, dummy_y_pool_onehot, 
+            dummy_X_test, dummy_y_test_onehot
+        )
+        
+        self.dm.create_dataset(pool_size=4, test_size=2)
+        
+        # Check features were stored correctly
+        np.testing.assert_array_equal(self.dm.X_pool, dummy_X_pool)
+        np.testing.assert_array_equal(self.dm.X_test_fixed, dummy_X_test)
+        
+        # Check labels were successfully converted from one-hot to 1D (argmax)
+        expected_y_pool = np.array([0, 1, 0, 1])
+        expected_y_test = np.array([1, 0])
+        
+        np.testing.assert_array_equal(self.dm.y_pool, expected_y_pool)
+        np.testing.assert_array_equal(self.dm.y_test_fixed, expected_y_test)
+    
+    @patch('data_manager.ad_hoc_data')
+    def test_get_data_split_returns_six_arrays(self, mock_ad_hoc):
+        mock_ad_hoc.return_value = (
+            np.zeros((800, 2)), np.array([[1, 0]] * 400 + [[0, 1]] * 400),
+            np.zeros((200, 2)), np.array([[1, 0]] * 100 + [[0, 1]] * 100)
+        )
+        
+        self.dm.create_dataset(num_dims=2, gap=0.3, pool_size=800, test_size=200)
+        result = self.dm.get_data_split(seed=0)
+        
+        assert len(result) == 6, "Expected (X_train, X_val, X_test, y_train, y_val, y_test)"
+
+    @patch('data_manager.ad_hoc_data')
+    def test_get_data_split_no_overlap_between_train_and_test(self, mock_ad_hoc):
+        """Train and test sets must be disjoint (no data leakage)."""
+        
+        # Generate strictly unique values to prevent accidental numeric collisions
+        # X_pool gets values from 0 to 1599, X_test gets values from 2000 to 2399
+        X_pool_dummy = np.arange(1600).reshape(800, 2) * 0.1
+        y_pool_dummy = np.array([[1, 0]] * 400 + [[0, 1]] * 400)
+        
+        X_test_dummy = np.arange(2000, 2400).reshape(200, 2) * 0.1
+        y_test_dummy = np.array([[1, 0]] * 100 + [[0, 1]] * 100)
+
+        mock_ad_hoc.return_value = (X_pool_dummy, y_pool_dummy, X_test_dummy, y_test_dummy)
+
+        self.dm.create_dataset(num_dims=2, gap=0.3, pool_size=800, test_size=200)
+        X_tr, X_val, X_te, y_tr, y_val, y_te = self.dm.get_data_split(seed=0)
+
+        def to_set(arr):
+            # Rounding safely handles any floating point quirks if a MinMaxScaler was applied
+            return set(map(tuple, np.round(arr, 6)))
+
+        assert to_set(X_tr).isdisjoint(to_set(X_te)), "Train/test overlap detected"
+        assert to_set(X_val).isdisjoint(to_set(X_te)), "Val/test overlap detected"
+        assert to_set(X_tr).isdisjoint(to_set(X_val)), "Train/val overlap detected"
+        
