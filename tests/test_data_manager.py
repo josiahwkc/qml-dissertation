@@ -306,3 +306,91 @@ class TestQuantumBenchmarkDataManager:
         assert to_set(X_val).isdisjoint(to_set(X_te)), "Val/test overlap detected"
         assert to_set(X_tr).isdisjoint(to_set(X_val)), "Train/val overlap detected"
         
+class TestCSVDataManager:
+
+    def setup_method(self):
+        self.dm = CSVDataManager()
+        # We define the data here as a dictionary to avoid calling pd.read_csv 
+        # while the mock might be active in the background.
+        self.raw_data = {
+            'feature1': [1.0, 1.1, 5.0, 5.1, 2.0, 2.2],
+            'feature2': [2.0, 2.1, 6.0, 6.1, 3.0, 3.2],
+            'category_col': ['A', 'B', 'A', 'B', 'A', 'B'],
+            'target': [0, 1, 0, 1, 0, 1]
+        }
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_load_dataset_stores_attributes(self, mock_read_csv, mock_exists):
+        """Test core attributes with a guaranteed real DataFrame."""
+        mock_exists.return_value = True
+        # Explicitly return a real DataFrame object created from our dict
+        mock_read_csv.return_value = pd.DataFrame(self.raw_data)
+        
+        self.dm.load_dataset(filename="test.csv", target_col="target", num_dims=2)
+        
+        assert self.dm.filename == "test.csv"
+        assert self.dm.X.shape == (6, 3) # 2 features + 1 encoded category
+        assert len(self.dm.y) == 6
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_load_dataset_encodes_categorical(self, mock_read_csv, mock_exists):
+        """Verify categorical string columns are transformed to integers."""
+        mock_exists.return_value = True
+        mock_read_csv.return_value = pd.DataFrame(self.raw_data)
+        
+        # Identify category_col as the one to encode
+        self.dm.load_dataset(filename="test.csv", target_col="target", categorical_cols=["category_col"])
+        
+        # Check that the data is numeric (LabelEncoder result)
+        assert np.issubdtype(self.dm.X.dtype, np.number)
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_n_class_filtering(self, mock_read_csv, mock_exists):
+        """Ensure rows are filtered based on n_class."""
+        mock_exists.return_value = True
+        # Data with 3 classes
+        df_3_classes = pd.DataFrame({
+            'f1': [1, 2, 3, 4],
+            't': [0, 1, 2, 0]
+        })
+        mock_read_csv.return_value = df_3_classes
+        
+        self.dm.load_dataset("multi.csv", "t", n_class=2)
+        
+        unique_classes = np.unique(self.dm.y)
+        assert 2 not in unique_classes
+        assert len(unique_classes) == 2
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_get_data_split_full_pipeline(self, mock_read_csv, mock_exists):
+        """Verify the 80/20 splits and PCA/Scaling pipeline works."""
+        mock_exists.return_value = True
+        # We need a larger dataset to satisfy StratifiedKFold/split requirements
+        large_data = {
+            'f1': np.random.randn(20),
+            'f2': np.random.randn(20),
+            'target': [0, 1] * 10
+        }
+        mock_read_csv.return_value = pd.DataFrame(large_data)
+        
+        self.dm.load_dataset("large.csv", "target", num_dims=1)
+        X_tr, X_val, X_te, y_tr, y_val, y_te = self.dm.get_data_split(seed=42)
+        
+        # Verify PCA reduction worked (from 2 features to 1)
+        assert X_tr.shape[1] == 1
+        # Verify MinMaxScaler worked ([0, 1] range)
+        assert X_tr.min() >= -1e-7 and X_tr.max() <= 1 + 1e-7
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_raises_error_on_missing_column(self, mock_read_csv, mock_exists):
+        """Confirm ValueError is raised if target_col is missing from CSV."""
+        mock_exists.return_value = True
+        mock_read_csv.return_value = pd.DataFrame(self.raw_data)
+        
+        with pytest.raises(ValueError, match="not found"):
+            self.dm.load_dataset("test.csv", target_col="non_existent_column")
