@@ -348,6 +348,111 @@ class TestCSVDataManager:
 
     @patch('data_manager.Path.exists')
     @patch('data_manager.pd.read_csv')
+    def test_file_path_does_not_exist(self, mock_read_csv, mock_exists):
+        """Ensures a FileNotFoundError is raised when a file path does not exist"""
+        mock_exists.return_value = False
+        
+        # Verify that calling load_dataset raises the expected error
+        with pytest.raises(FileNotFoundError, match="Dataset not found"):
+            self.dm.load_dataset(filename="non_existent.csv", target_col="target")
+        
+        # Verify that read_csv was never called because the path check failed
+        mock_read_csv.assert_not_called()
+    
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_load_dataset_drops_columns(self, mock_read_csv, mock_exists):
+        """Verify that specified columns are removed and ignore errors works."""
+        mock_exists.return_value = True
+        # Create a DataFrame with an extra column 'unwanted'
+        df_with_extra = pd.DataFrame({
+            'feature1': [1, 2, 3],
+            'feature2': [4, 5, 6],
+            'unwanted': [7, 8, 9],
+            'target': [0, 1, 0]
+        })
+        mock_read_csv.return_value = df_with_extra
+        
+        # We drop 'unwanted' and a column that doesn't exist ('fake_col')
+        # This tests both the dropping logic and the 'ignore' error handling
+        self.dm.load_dataset(
+            filename="test.csv", 
+            target_col="target", 
+            drop_cols=["unwanted", "fake_col"]
+        )
+        
+        # The resulting X should only have 2 columns (feature1, feature2)
+        # 'unwanted' was dropped, 'target' was separated, 'fake_col' was ignored
+        assert self.dm.X.shape[1] == 2
+        
+        # Verify total shape.
+        assert self.dm.X.shape[0] == 3
+        
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_load_dataset_fills_missing_values_with_mean(self, mock_read_csv, mock_exists, capsys):
+        """Verify that NaNs in features are replaced by column means and a warning is printed."""
+        mock_exists.return_value = True
+        
+        # Create a DataFrame with a missing value in 'feature1'
+        df_with_nan = pd.DataFrame({
+            'feature1': [1.0, 5.0, np.nan],
+            'feature2': [10.0, 20.0, 30.0],
+            'target': [0, 1, 0]
+        })
+        mock_read_csv.return_value = df_with_nan
+        
+        # Load the dataset
+        self.dm.load_dataset(filename="missing.csv", target_col="target")
+        
+        # Check that the NaN was filled
+        assert not np.isnan(self.dm.X).any(), "X still contains NaN values"
+        
+        # Check that the specific value was filled with the mean (3.0)
+        # In the resulting array, feature1 is index 0. The NaN was at row index 2.
+        expected_mean = 3.0
+        np.testing.assert_almost_equal(self.dm.X[2, 0], expected_mean, err_msg="NaN not filled with correct mean")
+        
+        # Verify the warning message was printed to stdout
+        captured = capsys.readouterr()
+        assert "Warning: Missing values detected" in captured.out
+        assert "Filling with column means" in captured.out
+    
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_load_dataset_subsamples_with_stratification(self, mock_read_csv, mock_exists, capsys):
+        """Verify that the dataset is downsampled to max_samples while maintaining class balance."""
+        mock_exists.return_value = True
+        
+        # Create a balanced dataset of 100 samples (50 zeros, 50 ones)
+        n_total = 100
+        df_large = pd.DataFrame({
+            'feature1': np.random.rand(n_total),
+            'target': [0] * 50 + [1] * 50
+        })
+        mock_read_csv.return_value = df_large
+        
+        # Set max_samples to 20
+        max_s = 20
+        self.dm.load_dataset(filename="large_dataset.csv", target_col="target", max_samples=max_s)
+        
+        # 1. Verify the final size matches max_samples
+        assert len(self.dm.y) == max_s
+        assert self.dm.X.shape[0] == max_s
+        
+        # 2. Verify stratification: proportions should be preserved.
+        # Original: 50% class 0, 50% class 1. New: 10 samples of class 0, 10 samples of class 1.
+        unique, counts = np.unique(self.dm.y, return_counts=True)
+        counts_dict = dict(zip(unique, counts))
+        assert counts_dict[0] == 10, f"Expected 10 samples of class 0, got {counts_dict[0]}"
+        assert counts_dict[1] == 10, f"Expected 10 samples of class 1, got {counts_dict[1]}"
+        
+        # 3. Verify the log message was printed
+        captured = capsys.readouterr()
+        assert f"Subsampled to {max_s} samples (stratified)" in captured.out
+    
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
     def test_n_class_filtering(self, mock_read_csv, mock_exists):
         """Ensure rows are filtered based on n_class."""
         mock_exists.return_value = True
@@ -364,6 +469,32 @@ class TestCSVDataManager:
         assert 2 not in unique_classes
         assert len(unique_classes) == 2
 
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_load_dataset_warns_when_n_class_exceeds_available(self, mock_read_csv, mock_exists, capsys):
+        """Verify that a warning is printed and n_class is capped if it exceeds available classes."""
+        mock_exists.return_value = True
+        
+        # Create a DataFrame with only 2 unique classes (0 and 1)
+        df_2_classes = pd.DataFrame({
+            'feature1': [1, 2, 3, 4],
+            'target': [0, 1, 0, 1]
+        })
+        mock_read_csv.return_value = df_2_classes
+        
+        # Request 5 classes, which is > 2 available classes
+        requested_n = 5
+        self.dm.load_dataset(filename="test.csv", target_col="target", n_class=requested_n)
+        
+        # Capture the printed output to check for the warning
+        captured = capsys.readouterr()
+        assert "Warning: Requested 5 classes but only 2 available" in captured.out
+        
+        # Verify that the resulting data still contains the available classes
+        unique_classes = np.unique(self.dm.y)
+        assert len(unique_classes) == 2
+        assert list(unique_classes) == [0, 1]
+    
     @patch('data_manager.Path.exists')
     @patch('data_manager.pd.read_csv')
     def test_get_data_split_full_pipeline(self, mock_read_csv, mock_exists):
@@ -384,6 +515,64 @@ class TestCSVDataManager:
         assert X_tr.shape[1] == 1
         # Verify MinMaxScaler worked ([0, 1] range)
         assert X_tr.min() >= -1e-7 and X_tr.max() <= 1 + 1e-7
+    
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')    
+    def test_get_kfold_splits_yields_correct_number_of_folds(self, mock_read_csv, mock_exists):
+        mock_exists.return_value = True
+        # We need a larger dataset to satisfy StratifiedKFold/split requirements
+        large_data = {
+            'f1': np.random.randn(20),
+            'f2': np.random.randn(20),
+            'target': [0, 1] * 10
+        }
+        mock_read_csv.return_value = pd.DataFrame(large_data)
+        
+        self.dm.load_dataset("large.csv", "target", num_dims=1)
+        
+        folds = list(self.dm.get_kfold_splits(seed=0, k_folds=5))
+        assert len(folds) == 5
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_get_kfold_splits_each_fold_has_six_arrays(self, mock_read_csv, mock_exists):
+        mock_exists.return_value = True
+        # We need a larger dataset to satisfy StratifiedKFold/split requirements
+        large_data = {
+            'f1': np.random.randn(20),
+            'f2': np.random.randn(20),
+            'target': [0, 1] * 10
+        }
+        mock_read_csv.return_value = pd.DataFrame(large_data)
+        
+        self.dm.load_dataset("large.csv", "target", num_dims=1)
+        for fold in self.dm.get_kfold_splits(seed=0, k_folds=3):
+            assert len(fold) == 6
+
+    @patch('data_manager.Path.exists')
+    @patch('data_manager.pd.read_csv')
+    def test_get_kfold_splits_test_set_identical_across_folds(self, mock_read_csv, mock_exists):
+        mock_exists.return_value = True
+        # We need a larger dataset to satisfy StratifiedKFold/split requirements
+        large_data = {
+            'f1': np.random.randn(20),
+            'f2': np.random.randn(20),
+            'target': [0, 1] * 10
+        }
+        mock_read_csv.return_value = pd.DataFrame(large_data)
+        
+        self.dm.load_dataset("large.csv", "target", num_dims=1)
+        folds = list(self.dm.get_kfold_splits(seed=0, k_folds=3))
+        first_y_test = folds[0][5]
+        for fold in folds[1:]:
+            np.testing.assert_array_equal(
+                fold[5], first_y_test,
+                err_msg="y_test changed between folds — test set is not fixed"
+            )
+        # Also check the test set is the same size in every fold
+        first_test_size = folds[0][2].shape[0]
+        for fold in folds[1:]:
+            assert fold[2].shape[0] == first_test_size
 
     @patch('data_manager.Path.exists')
     @patch('data_manager.pd.read_csv')
