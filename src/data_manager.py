@@ -19,8 +19,7 @@ Key Features:
   - Reproducible splits via random seeds
 """
 
-# %%
-# Imports
+
 import pandas as pd
 from pathlib import Path
 import numpy as np
@@ -58,31 +57,47 @@ class TrainingSampler():
         return X_train, y_train
 
 
-class AdhocDataManager():
+class QuantumBenchmarkDataManager():
     """Generates synthetic data using Qiskit's ad_hoc_data"""
-    def __init__(self, num_dims, gap=0.3):
-        self.num_dims = num_dims
-                
-        # Generate fixed pools
-        X_train_pool, y_train_pool, X_test_fixed, y_test_fixed = ad_hoc_data(
-            training_size=600, 
-            test_size=200, 
-            n=num_dims, 
-            gap=gap, 
-            plot_data=False
+    
+    def __init__(self):
+        self.X_pool = None
+        self.y_pool = None
+        self.X_test_fixed = None
+        self.y_test_fixed = None
+    
+    def create_dataset(self, num_dims=2, gap=0.3, pool_size=800, test_size=200):
+        """
+        Generate synthetic data using ad_hoc_data.
+        
+        Args:
+            num_dims: Number of features
+            gap: Class separation
+            pool_size: Size of training pool for sampling
+            test_size: Size of fixed test set
+        """
+        per_class_train = pool_size // 2
+        per_class_test = test_size // 2
+        
+        # Generate data pool + fixed test set
+        X_pool, y_pool, X_test, y_test = ad_hoc_data(
+            training_size=per_class_train,
+            test_size=per_class_test,
+            n=num_dims,
+            gap=gap,
+            plot_data=True
         )
         
         # Convert one-hot to 1D labels
-        self.X_pool = X_train_pool
-        self.y_pool = np.argmax(y_train_pool, axis=1)
-        
-        self.X_test_fixed = X_test_fixed
-        self.y_test_fixed = np.argmax(y_test_fixed, axis=1)
-        
+        self.X_pool = X_pool
+        self.y_pool = np.argmax(y_pool, axis=1)
+        self.X_test_fixed = X_test
+        self.y_test_fixed = np.argmax(y_test, axis=1)
+    
     def get_data_split(self, seed):
-        """Creates train/val/test split."""
+        """Create train/test/validation split"""
         
-        # Split the training pool into train (80%) and validation (20%)
+        # Split into 80% (of 800) train and 20% (of 200) validation
         X_train, X_val, y_train, y_val = train_test_split(
             self.X_pool, self.y_pool, test_size=0.2, random_state=seed, stratify=self.y_pool
         )
@@ -93,10 +108,11 @@ class AdhocDataManager():
 class CSVDataManager():
     """Manages arbitrary CSV datasets with automatic preprocessing"""
     def __init__(self):
+        self.filename = None
         self.X = None
         self.y = None
     
-    def load_dataset(self, filename, target_col, num_dims, n_class=2, 
+    def load_dataset(self, filename, target_col, num_dims=5, n_class=2, 
                  categorical_cols=None, drop_cols=None, max_samples=1000):
         """
         Args:
@@ -108,6 +124,7 @@ class CSVDataManager():
             drop_cols: List of columns to drop before processing
             max_samples: Maximum total samples to use (for large datasets like MNIST)
         """
+        self.filename = filename
         self.num_dims = num_dims
         self.target_col = target_col
         
@@ -215,7 +232,7 @@ class CSVDataManager():
             preprocessing_pipeline = Pipeline([
                 ('std_scaler', StandardScaler()),
                 ('pca', PCA(n_components=self.num_dims)), 
-                ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+                ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
             ])
             
             X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
@@ -247,7 +264,7 @@ class CSVDataManager():
         preprocessing_pipeline = Pipeline([
             ('std_scaler', StandardScaler()),
             ('pca', PCA(n_components=self.num_dims)),
-            ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
         ])
         
         # Fit on X_train, transform all
@@ -383,7 +400,7 @@ class SyntheticDataManager():
             
             preprocessing_pipeline = Pipeline([
                 ('std_scaler', StandardScaler()),
-                ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+                ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
             ])
             
             X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
@@ -416,7 +433,7 @@ class SyntheticDataManager():
         # Preprocessing
         preprocessing_pipeline = Pipeline([
             ('std_scaler', StandardScaler()), 
-            ('minmax_scaler', MinMaxScaler(feature_range=(-1, 1)))
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
         ])
         
         X_train_processed = preprocessing_pipeline.fit_transform(X_train)
@@ -424,4 +441,3 @@ class SyntheticDataManager():
         X_val_processed = preprocessing_pipeline.transform(X_val)
         
         return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
-# %%

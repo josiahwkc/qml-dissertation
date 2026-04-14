@@ -16,17 +16,17 @@ Attribution:
   - Original URL: https://github.com/Qiskit/platypus/blob/main/notebooks/summer-school/2021/resources/lab-notebooks/lab-3.ipynb
 """
 
-# %%
-# Imports
+import os
 import time
 import warnings
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 from sklearn.svm import SVC
 from sklearn import metrics
 
-from data_manager import CSVDataManager, AdhocDataManager, SyntheticDataManager, TrainingSampler
+from data_manager import CSVDataManager, QuantumBenchmarkDataManager, SyntheticDataManager, TrainingSampler
 from tuner import ClassicalSVMTuner, QuantumSVMTuner
 
 # Quantum Imports
@@ -34,120 +34,195 @@ from qiskit.circuit.library import ZZFeatureMap
 from qiskit_machine_learning.kernels import FidelityQuantumKernel
 from feature_map_factory import FeatureMapFactory
 
-# %%
-# Experiment Class
-def nadeau_bengio_corrected_ttest(q_scores, c_scores, n_train, n_test):
-    """
-    Computes the Nadeau-Bengio corrected paired t-test for repeated 
-    train/test splits. Corrects for the variance underestimation caused 
-    by overlapping training sets.
-    
-    Ref: Nadeau, C., and Bengio, Y. (2003). Inference for the Generalization Error.
-    """
-    differences = np.array(q_scores) - np.array(c_scores)
-    k = len(differences)
-    
-    if k < 2:
-        return 1.0 # Need at least 2 trials for variance
-        
-    mean_diff = np.mean(differences)
-    var_diff = np.var(differences, ddof=1)
-    
-    if var_diff == 0:
-        return 1.0 # No variance, identical models
-        
-    # The Nadeau-Bengio variance correction
-    # (1/k) accounts for the number of trials
-    # (n_test/n_train) accounts for the overlap in training data
-    corrected_variance = var_diff * ((1 / k) + (n_test / n_train))
-    
-    t_stat = mean_diff / np.sqrt(corrected_variance)
-    
-    # Calculate two-tailed p-value
-    p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
-    return p_val
-
 class ExperimentConfig:
-    """Configuration for experiment modes"""
+    """Configuration for experiment modes with explicit data source types"""
+    
+    NUM_DIMS = 5          # Number of PCA dimensions (and Qubits)
+    NUM_TRIALS = 10 #30   # Number of random seeds to average over
+    N_CLASS = 2           # Binary classification
+    FIXED_SIZE = 100      # Default training size for non-'size' experiments
+    
+    # Define data source types
+    DATA_SOURCE_CSV = 'csv'
+    DATA_SOURCE_SKLEARN = 'sklearn'
+    DATA_SOURCE_QISKIT = 'qiskit'
     
     MODES = {
+        # =====================================================================
+        # CSV DATA MODES (Real datasets)
+        # =====================================================================
         'size': {
             'x_label': 'Training Samples',
             'title_suffix': 'vs Training Size',
             'value_name': 'Training Size',
-            'is_synthetic': False
+            'data_source': DATA_SOURCE_CSV,
+            'requires_file': True,
+            'sweep_values': [10, 50, 100, 150, 200, 250, 300],
+            'description': 'Vary training set size on real data'
         },
         'imbalance': {
             'x_label': 'Class Imbalance Ratio',
             'title_suffix': 'vs Class Imbalance',
             'value_name': 'Ratio',
-            'is_synthetic': False
+            'data_source': DATA_SOURCE_CSV,
+            'requires_file': True,
+            'sweep_values': True,
+            'description': 'Vary class imbalance ratio on real data'
         },
+        
+        # =====================================================================
+        # SKLEARN SYNTHETIC MODES (make_classification)
+        # =====================================================================
         'feature_complexity': {
             'x_label': 'Informative Features',
             'title_suffix': 'vs Feature Complexity',
             'value_name': 'Informative Features',
-            'is_synthetic': True
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [1, 2, 3, 4, 5],
+            'sweep_parameter': 'n_informative',
+            'description': 'Vary number of informative features in synthetic data'
         },
         'margin': {
             'x_label': 'Class Separation',
             'title_suffix': 'vs Margin',
             'value_name': 'Class Separation',
-            'is_synthetic': True
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [0.1, 0.5, 1.0, 1.5, 2.0],
+            'sweep_parameter': 'class_sep',
+            'description': 'Vary class separation margin in synthetic data'
         },
         'clusters': {
             'x_label': 'Clusters per Class',
             'title_suffix': 'vs Clusters',
             'value_name': 'Clusters/Class',
-            'is_synthetic': True
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [1, 2, 3, 4],
+            'sweep_parameter': 'n_clusters_per_class',
+            'description': 'Vary decision boundary complexity via clusters'
         },
         'noise': {
             'x_label': 'Label Noise',
             'title_suffix': 'vs Noise',
             'value_name': 'Noise Fraction',
-            'is_synthetic': True
-        }
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [0.0, 0.05, 0.10, 0.15, 0.20],
+            'sweep_parameter': 'flip_y',
+            'description': 'Vary label noise in synthetic data'
+        },
+        
+        # =====================================================================
+        # QISKIT SYNTHETIC MODE (ad_hoc_data)
+        # =====================================================================
+        'quantum_benchmark': {
+            'x_label': 'Training Samples',
+            'title_suffix': 'vs Training Size',
+            'value_name': 'Training Size',
+            'data_source': DATA_SOURCE_QISKIT,
+            'requires_file': False,
+            'sweep_values': [10, 50, 100],
+            'sweep_parameter': 'gap',
+            'description': 'Qiskit ad_hoc_data optimized for ZZFeatureMap',
+            'fixed_dims': 2,  # ad_hoc_data only allows 2 or 3 dimensions
+        },
     }
     
     @classmethod
     def get(cls, mode):
-        """Get configuration for a mode"""
+        """
+        Get configuration for a mode.
+        
+        Args:
+            mode: Experiment mode name
+            
+        Returns:
+            dict: Configuration dictionary
+            
+        Raises:
+            ValueError: If mode is invalid
+        """
         if mode not in cls.MODES:
-            raise ValueError(f"Invalid mode: {mode}")
+            available = ', '.join(cls.MODES.keys())
+            raise ValueError(
+                f"Invalid mode: '{mode}'. Available modes: {available}"
+            )
         return cls.MODES[mode]
 
 
 class ExperimentRunner():
-    def __init__(self, quantum_provider, sweep_values_dict, num_dims, num_trials, fixed_size):
+    def __init__(self, quantum_provider):
         self.qp = quantum_provider
-        self.num_dims = num_dims
-        self.num_trials = num_trials
-        self.sweep_values_dict = sweep_values_dict
-        self.fixed_size = fixed_size
+        self.num_dims = ExperimentConfig.NUM_DIMS
+        self.num_trials = ExperimentConfig.NUM_TRIALS
+        self.fixed_size = ExperimentConfig.FIXED_SIZE
+        self.config = None
         
         self.classical_clf = SVC(kernel='rbf')
         self.data_manager = None
         self.clear_results()
-    
-    def initialise_datasets(self, mode=None, filename=None, target_col=None):
-        if mode in ['feature_complexity', 'margin', 'clusters', 'noise']:
-            self.data_manager = SyntheticDataManager()
-            self.data_manager.initialise_datasets(num_dims=self.num_dims, mode=mode, sweep_values=self.sweep_values_dict[mode])
         
-        elif mode in ['size', 'imbalance']:
+    def initialise_datasets(self, mode, filename=None, target_col=None):
+        """
+        Initialize datasets based on mode's data source.
+        
+        Args:
+            mode: Experiment mode
+            filename: CSV filename (required for CSV modes)
+            target_col: Target column (required for CSV modes)
+        """
+        self.config = ExperimentConfig.get(mode)
+        
+        # Validation
+        if self.config['requires_file'] and (filename is None or target_col is None):
+            raise ValueError(
+                f"Mode '{mode}' requires filename and target_col parameters"
+            )
+        
+        data_source = self.config['data_source']
+        sweep_values = self.config['sweep_values']
+        
+        if data_source == ExperimentConfig.DATA_SOURCE_CSV:
+            print(f"Loading CSV dataset: {filename}")
             self.data_manager = CSVDataManager()
-            self.data_manager.load_dataset(filename=filename, target_col=target_col, num_dims=self.num_dims)
+            self.data_manager.load_dataset(
+                filename=filename,
+                target_col=target_col,
+                num_dims=self.num_dims
+            )
+        
+        elif data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
+            print(f"Generating sklearn synthetic datasets for '{mode}' mode...")
+            self.data_manager = SyntheticDataManager()
+            self.data_manager.initialise_datasets(
+                num_dims=self.num_dims,
+                mode=mode,
+                sweep_values=sweep_values
+            )
+        
+        elif data_source == ExperimentConfig.DATA_SOURCE_QISKIT:
+            print(f"Generating Qiskit ad_hoc datasets for '{mode}' mode...")
+            
+            fixed_dims = self.config['fixed_dims']
+            print(f"Note: ad_hoc_data works best with {fixed_dims} dimensions.")
+            print(f"Generating dataset with {fixed_dims} dimensions.")
+                
+            self.data_manager = QuantumBenchmarkDataManager()
+            self.data_manager.create_dataset()
         
         else:
-            raise ValueError(f"Invalid mode: {mode}")
+            raise ValueError(f"Unknown data source: {data_source}")
     
     def clear_results(self):
         self.results = {
             'x_values': [],
-            'sizes': [],
             'q_acc': [], 'q_acc_std': [], 'q_f1': [], 'q_f1_std': [], 'q_time': [],
             'c_acc': [], 'c_acc_std': [], 'c_f1': [], 'c_f1_std': [], 'c_time': [],
-            'delta_acc': [], 'p_val_acc': [], 'delta_f1': [], 'p_val_f1': []
+            'delta_acc': [], 'p_val_acc': [], 'cohen_d_acc': [],
+            'delta_f1': [], 'p_val_f1': [], 'cohen_d_f1': [],
+            'time_ratio': []
         }
        
     def run_classical(self, X_train, X_test, y_train, y_test, params):
@@ -199,13 +274,11 @@ class ExperimentRunner():
         
         # Resets and clears stored results
         self.clear_results()
-           
-        config = ExperimentConfig.get(mode)
         
-        sweep_values = self.sweep_values_dict[mode]
+        sweep_values = self.config['sweep_values']
         
         # Phase 1: Tune hyperparameters  
-        c_params, q_params = self._tune_hyperparameters(mode, sweep_values)
+        c_params, q_params = self._tune_hyperparameters(mode)
 
         # Phase 2: Build quantum kernel once
         # shared_kernel = self._build_quantum_kernel(q_params)
@@ -225,18 +298,89 @@ class ExperimentRunner():
             self._run_trials_for_value(
                 mode=mode,
                 value=value,
-                config=config,
-                num_trials=self.num_trials,
-                fixed_size=self.fixed_size,
                 c_params=c_params,
                 q_params=q_params,
                 shared_kernel=shared_kernel
             )
         
         # Phase 4: Plot results after all values complete
-        self.plot_results(config['x_label'], config['title_suffix'])
+        self.plot_results(self.config)
+        save_dir, _ = self._get_output_meta(self.config)
+        
+        df = pd.DataFrame(self.results)
+        df.to_csv(os.path.join(save_dir, 'summary_metrics.csv'), index=False)
+        print(f"Data saved to {save_dir}/summary_metrics.csv")
     
-    def _tune_hyperparameters(self, mode, sweep_values):
+    def plot_results(self, config):
+        """Generate, save, and display individual comparison plots"""
+        
+        save_dir, dataset_name = self._get_output_meta(config)
+        
+        # Create the directory if it doesn't exist
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"\nSaving plots to: {save_dir}/")
+        
+        
+        x_label = config['x_label']
+        title_suffix = config['title_suffix']
+        
+        # 1. Accuracy Plot
+        plt.figure(figsize=(8, 6))
+        plt.errorbar(self.results['x_values'], self.results['c_acc'], 
+                     yerr=self.results['c_acc_std'], fmt='o-', capsize=5, 
+                     label='Classical', color='blue')
+        plt.errorbar(self.results['x_values'], self.results['q_acc'], 
+                     yerr=self.results['q_acc_std'], fmt='s-', capsize=5, 
+                     label='Quantum', color='purple')
+        
+        plt.title(f'Accuracy {title_suffix} ({dataset_name})')
+        plt.xlabel(x_label)
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(save_dir, 'accuracy.png'), dpi=300)
+        plt.show()
+        
+        # 2. F1 Score Plot
+        plt.figure(figsize=(8, 6))
+        plt.errorbar(self.results['x_values'], self.results['c_f1'], 
+                     yerr=self.results['c_f1_std'], fmt='o-', capsize=5, 
+                     label='Classical', color='blue')
+        plt.errorbar(self.results['x_values'], self.results['q_f1'], 
+                     yerr=self.results['q_f1_std'], fmt='s-', capsize=5, 
+                     label='Quantum', color='purple')
+        
+        plt.title(f'F1 Score {title_suffix} ({dataset_name})')
+        plt.xlabel(x_label)
+        plt.ylabel('F1 Score')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(save_dir, 'f1_score.png'), dpi=300)
+        plt.show()
+        
+        # 3. Training Time Plot
+        plt.figure(figsize=(8, 6))
+        plt.plot(self.results['x_values'], self.results['c_time'], 
+                 'o-', label='Classical', color='blue')
+        plt.plot(self.results['x_values'], self.results['q_time'], 
+                 's-', label='Quantum', color='purple')
+        
+        plt.title(f'Training Time {title_suffix} ({dataset_name})')
+        plt.yscale('log')
+        plt.xlabel(x_label)
+        plt.ylabel('Time (s)')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(save_dir, 'training_time.png'), dpi=300)
+        plt.show()
+        
+    def _tune_hyperparameters(self, mode):
         """
         Tune hyperparameters on baseline dataset.
         
@@ -248,7 +392,7 @@ class ExperimentRunner():
         print("="*80)
         
         # Get baseline dataset
-        X_train, X_val, y_train, y_val = self._get_baseline_split(mode, sweep_values)
+        X_train, X_val, y_train, y_val = self._get_baseline_split(mode)
         
         print(f"  Tuning set: Train={len(y_train)}, Val={len(y_val)}")
         
@@ -273,11 +417,12 @@ class ExperimentRunner():
         
         return c_params, q_params
     
-    def _get_baseline_split(self, mode, sweep_values):
+    def _get_baseline_split(self, mode):
         """Get train/val split from baseline dataset"""
-        config = ExperimentConfig.get(mode)
+        sweep_values = self.config['sweep_values']
+        data_source = self.config['data_source']
         
-        if config['is_synthetic']:
+        if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
             # Use middle value as baseline
             baseline_value = sweep_values[len(sweep_values) // 2]
             label = f"{mode}_{baseline_value}"
@@ -308,56 +453,50 @@ class ExperimentRunner():
         
         return kernel
 
-    def _run_trials_for_value(self, mode, value, config, num_trials, 
-                              fixed_size, c_params, q_params, shared_kernel):
+    def _run_trials_for_value(self, mode, value, c_params, q_params, shared_kernel):
         """Run all trials for a single sweep value"""
         print(f"\n{'-'*80}")
-        print(f"RUNNING: {config['value_name']} = {value}")
+        print(f"RUNNING: {self.config['value_name']} = {value}")
         print(f"{'-'*80}")
         
         # Get data iterator
-        data_iterator = self._get_data_iterator(
-            mode, value, config, num_trials, fixed_size
-        )
+        data_iterator = self._get_data_iterator(mode, value)
         
         # Run trials and collect results
-        c_data, q_data = self._run_trials(
-            data_iterator, num_trials, config['is_synthetic'],
-            c_params, q_params, shared_kernel
-        )
+        c_data, q_data = self._run_trials(data_iterator, c_params, q_params, shared_kernel)
         
         # Calculate and display statistics
         self._process_results(
-            value, c_data, q_data, num_trials, config
+            value, c_data, q_data, mode
         )
     
-    def _get_data_iterator(self, mode, value, config, num_trials, fixed_size):
+    def _get_data_iterator(self, mode, value):
         """Get appropriate data iterator based on mode"""
-        if config['is_synthetic']:
-            return self._get_kfold_iterator(mode, value, num_trials)
+        data_source = self.config['data_source']
+        
+        if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
+            return self._get_kfold_iterator(mode, value)
         else:
-            return self._get_monte_carlo_iterator(
-                mode, value, num_trials, fixed_size
-            )
+            return self._get_monte_carlo_iterator(mode, value)
     
-    def _get_kfold_iterator(self, mode, value, num_trials):
+    def _get_kfold_iterator(self, mode, value):
         """K-fold cross-validation iterator for synthetic data"""
-        print(f"Executing {num_trials}-Fold Cross Validation...")
+        print(f"Executing {self.num_trials}-Fold Cross Validation...")
         
         label = f"{mode}_{value}"
         
-        for idx, splits in enumerate(self.data_manager.get_kfold_splits(k_folds=num_trials, seed=42, label=label)):
+        for idx, splits in enumerate(self.data_manager.get_kfold_splits(k_folds=self.num_trials, seed=42, label=label)):
             yield idx, splits
     
-    def _get_monte_carlo_iterator(self, mode, value, num_trials, fixed_size):
+    def _get_monte_carlo_iterator(self, mode, value):
         """Monte Carlo random sub-sampling for CSV data"""
-        print(f"Executing Monte Carlo Sub-Sampling ({num_trials} trials)...")
+        print(f"Executing Monte Carlo Sub-Sampling ({self.num_trials} trials)...")
         
-        for trial in range(num_trials):
+        for trial in range(self.num_trials):
             X_pool, X_val, X_test, y_pool, y_val, y_test = \
                 self.data_manager.get_data_split(seed=trial)
             
-            train_size = value if mode == 'size' else fixed_size
+            train_size = value if mode in ['size', 'quantum_benchmark'] else self.fixed_size
             imbalance = value if mode == 'imbalance' else 0.5
             
             X_train, y_train = TrainingSampler.create_class_imbalance(
@@ -370,16 +509,17 @@ class ExperimentRunner():
             
             yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
     
-    def _run_trials(self, data_iterator, num_trials, is_kfold, 
-                   c_params, q_params, shared_kernel):
+    def _run_trials(self, data_iterator, c_params, q_params, shared_kernel):
         """Execute all trials and collect results"""
         c_data = {'acc': [], 'f1': [], 'time': []}
         q_data = {'acc': [], 'f1': [], 'time': []}
         
+        is_kfold = self.config['data_source'] == ExperimentConfig.DATA_SOURCE_SKLEARN
+        
         label_type = "Fold" if is_kfold else "Trial"
         
         for idx, (X_train, _, X_test, y_train, _, y_test) in data_iterator:
-            print(f"\n{label_type} {idx+1}/{num_trials} "
+            print(f"\n{label_type} {idx+1}/{self.num_trials} "
                   f"(Train: {len(X_train)}, Test: {len(X_test)})...")
             
             # Run classical
@@ -401,13 +541,13 @@ class ExperimentRunner():
         
         return c_data, q_data
 
-    def _process_results(self, value, c_data, q_data, num_trials, config):
+    def _process_results(self, value, c_data, q_data, mode):
         """Calculate statistics, print tables, and store results"""
         # Calculate statistics
         stats = self._calculate_statistics(c_data, q_data)
         
         # Print performance tables
-        self._print_results_tables(c_data, q_data, stats, num_trials)
+        self._print_results_tables(value, c_data, q_data, stats)
         
         # Store for plotting
         self._store_results(value, stats)
@@ -450,67 +590,145 @@ class ExperimentRunner():
                               if std_pooled_f1 > 0 else 0.0)
         
         # Statistical tests
-        stats['p_val_acc'] = nadeau_bengio_corrected_ttest(
+        stats['p_val_acc'] = self._nadeau_bengio_corrected_ttest(
             q_data['acc'], c_data['acc'], n_train, n_test
         )
-        stats['p_val_f1'] = nadeau_bengio_corrected_ttest(
+        stats['p_val_f1'] = self._nadeau_bengio_corrected_ttest(
             q_data['f1'], c_data['f1'], n_train, n_test
         )
         
         return stats
     
-    def _print_results_tables(self, c_data, q_data, stats, num_trials):
-        """Print formatted results tables"""
-        # Table 1: Quantum performance
-        self._print_model_table("QUANTUM", q_data, stats, num_trials, is_quantum=True)
+    def _nadeau_bengio_corrected_ttest(self, q_scores, c_scores, n_train, n_test):
+        """
+        Computes the Nadeau-Bengio corrected paired t-test for repeated 
+        train/test splits. Corrects for the variance underestimation caused 
+        by overlapping training sets.
         
-        # Table 2: Classical performance
-        self._print_model_table("CLASSICAL", c_data, stats, num_trials, is_quantum=False)
+        Ref: Nadeau, C., and Bengio, Y. (2003). Inference for the Generalization Error.
+        """
+        differences = np.array(q_scores) - np.array(c_scores)
+        k = len(differences)
         
-        # Table 3: Statistical comparison
-        self._print_comparison_table(stats)
+        if k < 2:
+            return 1.0 # Need at least 2 trials for variance
+            
+        mean_diff = np.mean(differences)
+        var_diff = np.var(differences, ddof=1)
+        
+        if var_diff == 0:
+            return 1.0 # No variance, identical models
+            
+        # The Nadeau-Bengio variance correction
+        # (1/k) accounts for the number of trials
+        # (n_test/n_train) accounts for the overlap in training data
+        corrected_variance = var_diff * ((1 / k) + (n_test / n_train))
+        
+        t_stat = mean_diff / np.sqrt(corrected_variance)
+        
+        # Calculate two-tailed p-value
+        p_val = stats.t.sf(np.abs(t_stat), df=k-1) * 2
+        return p_val
     
-    def _print_model_table(self, model_name, data, stats, num_trials, is_quantum):
-        """Print performance table for one model"""
-        prefix = 'q' if is_quantum else 'c'
+    def _print_results_tables(self, value, c_data, q_data, stats):
+        """Generate formatted tables, print to console, and append to log file"""
         
-        print(f"\n[ {model_name} MODEL PERFORMANCE ]")
-        print("-" * 50)
-        print(f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}")
-        print("-" * 50)
+        # Build the text report as a list of strings
+        report = []
+        report.append(f"\n{'='*85}")
+        report.append(f"RESULTS FOR {self.config['value_name'].upper()}: {value}")
+        report.append(f"{'='*85}")
         
-        for i in range(num_trials):
-            print(f"{i+1:<6} | {data['acc'][i]:<10.2%} | "
-                  f"{data['f1'][i]:<10.2f} | {data['time'][i]:<10.4f}")
+        report.append(self._build_model_table_string("QUANTUM", q_data, stats))
+        report.append(self._build_model_table_string("CLASSICAL", c_data, stats))
+        report.append(self._build_comparison_table_string(stats))
         
-        print("-" * 50)
-        print(f"{'AVG':<6} | {stats[f'{prefix}_avg_acc']:<10.2%} | "
-              f"{stats[f'{prefix}_avg_f1']:<10.2f} | {stats[f'{prefix}_avg_time']:<10.4f}")
-        print(f"{'STD':<6} | {stats[f'{prefix}_std_acc']:<10.2%} | "
-              f"{stats[f'{prefix}_std_f1']:<10.2f} | {'-':<10}")
-        print("-" * 50)
-    
-    def _print_comparison_table(self, stats):
-        """Print statistical comparison table"""
-        print("\n[ STATISTICAL ANALYSIS ]")
-        print("-" * 85)
-        print(f'{"Metric":<8} | {"Delta":<12} | {"Cohen\'s d":<10} | '
-              f'{"p-value":<10} | {"Significant?"}')
-        print("-" * 85)
+        # Combine list into a single massive string
+        full_report = "\n".join(report)
         
+        # Print to console for real-time monitoring
+        print(full_report)
+        
+        # Unpack the tuple to safely get JUST the directory path
+        save_dir, _ = self._get_output_meta(self.config)
+        log_file = os.path.join(save_dir, 'detailed_report.txt')
+        
+        # Append to detailed_report.txt in your results folder
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(full_report + "\n")
+
+    def _build_model_table_string(self, model_name, data, stats):
+        """Builds and returns the performance table string for one model"""
+        prefix = 'q' if model_name == "QUANTUM" else 'c'
+        lines = [
+            f"\n[ {model_name} MODEL PERFORMANCE ]",
+            "-" * 50,
+            f"{'Trial':<6} | {'Acc':<10} | {'F1':<10} | {'Time (s)':<10}",
+            "-" * 50
+        ]
+        
+        for i in range(self.num_trials):
+            lines.append(f"{i+1:<6} | {data['acc'][i]:<10.2%} | "
+                         f"{data['f1'][i]:<10.2f} | {data['time'][i]:<10.4f}")
+            
+        lines.extend([
+            "-" * 50,
+            f"{'AVG':<6} | {stats[f'{prefix}_avg_acc']:<10.2%} | "
+            f"{stats[f'{prefix}_avg_f1']:<10.2f} | {stats[f'{prefix}_avg_time']:<10.4f}",
+            f"{'STD':<6} | {stats[f'{prefix}_std_acc']:<10.2%} | "
+            f"{stats[f'{prefix}_std_f1']:<10.2f} | {'-':<10}",
+            "-" * 50
+        ])
+        return "\n".join(lines)
+
+    def _build_comparison_table_string(self, stats):
+        """Builds and returns the statistical comparison table string"""
         sig_acc = "YES (*)" if stats['p_val_acc'] < 0.05 else "NO"
         sig_f1 = "YES (*)" if stats['p_val_f1'] < 0.05 else "NO"
         
-        print(f"{'Accuracy':<8} | {stats['delta_acc']:>+12.2%} | "
-              f"{stats['cohen_d_acc']:>10.2f} | {stats['p_val_acc']:>10.4f} | {sig_acc}")
-        print(f"{'F1 Score':<8} | {stats['delta_f1']:>+12.2%} | "
-              f"{stats['cohen_d_f1']:>10.2f} | {stats['p_val_f1']:>10.4f} | {sig_f1}")
-        print(f"{'Time':<8} | QSVM was {stats['time_ratio']:.0f}x slower")
-        print("-" * 85)
-        print()
+        lines = [
+            "\n[ STATISTICAL ANALYSIS ]",
+            "-" * 85,
+            f"{'Metric':<8} | {'Delta':<12} | {'Cohen\'s d':<10} | {'p-value':<10} | {'Significant?'}",
+            "-" * 85,
+            f"{'Accuracy':<8} | {stats['delta_acc']:>+12.2%} | {stats['cohen_d_acc']:>10.2f} | {stats['p_val_acc']:>10.4f} | {sig_acc}",
+            f"{'F1 Score':<8} | {stats['delta_f1']:>+12.2%} | {stats['cohen_d_f1']:>10.2f} | {stats['p_val_f1']:>10.4f} | {sig_f1}",
+            f"{'Time':<8} | QSVM was {stats['time_ratio']:.0f}x slower",
+            "-" * 85,
+            "\n"
+        ]
+        return "\n".join(lines)
+        
+    def _get_output_meta(self):
+        """Helper to dynamically generate the save directory and dataset display name"""
+        data_source = self.config['data_source']
+        
+        if data_source == ExperimentConfig.DATA_SOURCE_CSV:
+            dataset_name = self.data_manager.filename
+            base_folder = dataset_name.replace('.csv', '')
+        elif data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
+            dataset_name = "Sklearn Synthetic"
+            base_folder = "sklearn_synthetic"
+        elif data_source == ExperimentConfig.DATA_SOURCE_QISKIT:
+            dataset_name = "Qiskit Ad Hoc"
+            base_folder = "qiskit_adhoc"
+        else:
+            dataset_name = "Unknown Dataset"
+            base_folder = "unknown"
+            
+        folder_name = f"{base_folder}_{self.config['value_name']}"
+        safe_folder = folder_name.replace(' ', '_').lower()
+        
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        save_dir = os.path.join(parent_dir, "results", safe_folder)
+        
+        os.makedirs(save_dir, exist_ok=True)
+        
+        return save_dir, dataset_name
     
     def _store_results(self, value, stats):
-        """Store results for plotting"""
+        """Store results for plotting and CSV export"""
         self.results['x_values'].append(value)
         
         # Classical
@@ -530,52 +748,10 @@ class ExperimentRunner():
         # Comparisons
         self.results['delta_acc'].append(stats['delta_acc'])
         self.results['p_val_acc'].append(stats['p_val_acc'])
+        self.results['cohen_d_acc'].append(stats['cohen_d_acc'])
+        
         self.results['delta_f1'].append(stats['delta_f1'])
         self.results['p_val_f1'].append(stats['p_val_f1'])
-
-    def plot_results(self, x_label, title_suffix):
-        """Generate comparison plots"""
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
+        self.results['cohen_d_f1'].append(stats['cohen_d_f1'])
         
-        # Accuracy with error bars
-        ax1.errorbar(self.results['x_values'], self.results['c_acc'], 
-                     yerr=self.results['c_acc_std'], fmt='o-', capsize=5, 
-                     label='Classical', color='blue')
-        ax1.errorbar(self.results['x_values'], self.results['q_acc'], 
-                     yerr=self.results['q_acc_std'], fmt='s-', capsize=5, 
-                     label='Quantum', color='purple')
-        ax1.set_title(f'Accuracy {title_suffix}')
-        ax1.set_xlabel(x_label)
-        ax1.set_ylabel('Accuracy')
-        ax1.legend()
-        ax1.grid(True)
-        
-        # F1 Score with error bars
-        ax2.errorbar(self.results['x_values'], self.results['c_f1'], 
-                     yerr=self.results['c_f1_std'], fmt='o-', capsize=5, 
-                     label='Classical', color='blue')
-        ax2.errorbar(self.results['x_values'], self.results['q_f1'], 
-                     yerr=self.results['q_f1_std'], fmt='s-', capsize=5, 
-                     label='Quantum', color='purple')
-        ax2.set_title(f'F1 Score {title_suffix}')
-        ax2.set_xlabel(x_label)
-        ax2.set_ylabel('F1 Score')
-        ax2.legend()
-        ax2.grid(True)
-        
-        # Time (log scale)
-        ax3.plot(self.results['x_values'], self.results['c_time'], 
-                 'o-', label='Classical', color='blue')
-        ax3.plot(self.results['x_values'], self.results['q_time'], 
-                 's-', label='Quantum', color='purple')
-        ax3.set_title(f'Training Time {title_suffix}')
-        ax3.set_yscale('log')
-        ax3.set_xlabel(x_label)
-        ax3.set_ylabel('Time (s)')
-        ax3.legend()
-        ax3.grid(True)
-        
-        plt.tight_layout()
-        plt.show()
-
-# %%
+        self.results['time_ratio'].append(stats['time_ratio'])
