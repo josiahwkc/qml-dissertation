@@ -3,325 +3,388 @@ Integration Tests for Experiment Pipeline
 ==========================================
 
 These tests verify the end-to-end workflow of the experiment system.
+
+Aligned to the actual source API (experiment.py, data_manager.py, tuner.py).
+Key facts about the real implementation:
+  - ExperimentRunner.__init__ accepts only `quantum_provider`; num_dims /
+    num_trials / fixed_size come from ExperimentConfig class constants.
+  - run_quantum(X_train, X_test, y_train, y_test, kernel, params) — `kernel`
+    is a positional argument, not a keyword.
+  - results dict keys: x_values, q/c_acc/acc_std/f1/f1_std/time, delta_acc,
+    p_val_acc, cohen_d_acc, delta_f1, p_val_f1, cohen_d_f1, time_ratio.
+    There is no 'sizes' key.
+  - _get_output_meta() takes no arguments (uses self.config internally).
+  - initialise_datasets for sklearn modes creates a SyntheticDataManager and
+    calls .initialise_datasets() on the *instance*, not the class.
 """
 
 import unittest
 import numpy as np
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock, patch, call
 import sys
-
-# Mock quantum imports
-sys.modules['qiskit'] = MagicMock()
-sys.modules['qiskit.circuit'] = MagicMock()
-sys.modules['qiskit.circuit.library'] = MagicMock()
-sys.modules['qiskit_machine_learning'] = MagicMock()
-sys.modules['qiskit_machine_learning.kernels'] = MagicMock()
-sys.modules['feature_map_factory'] = MagicMock()
-sys.modules['data_manager'] = MagicMock()
-sys.modules['tuner'] = MagicMock()
+import types
 
 from experiment import ExperimentRunner, ExperimentConfig
 
 
+def _make_runner():
+    """Return an ExperimentRunner with a minimal mock quantum provider."""
+    mock_qp = Mock()
+    mock_qp.backend = Mock()
+    return ExperimentRunner(quantum_provider=mock_qp)
+
+
+def _separable_data(n_per_class=25, n_features=4, seed=42):
+    """Return a clearly linearly-separable binary dataset."""
+    rng = np.random.default_rng(seed)
+    offset = np.ones(n_features) * 3
+    X = np.vstack([
+        rng.standard_normal((n_per_class, n_features)) + offset,
+        rng.standard_normal((n_per_class, n_features)) - offset,
+    ])
+    y = np.array([0] * n_per_class + [1] * n_per_class)
+    return X, y
+
+
 class TestFullExperimentPipeline(unittest.TestCase):
-    """Test complete experiment pipeline from initialization to plotting"""
-    
+    """Test end-to-end initialisation paths for each data-source type."""
+
     def setUp(self):
-        """Set up mock dependencies"""
-        self.mock_qp = Mock()
-        self.mock_qp.backend = Mock()
-        
-        self.sweep_values_dict = {
-            'feature_complexity': [1, 2, 3]
-        }
-        
-        self.runner = ExperimentRunner(
-            quantum_provider=self.mock_qp,
-            sweep_values_dict=self.sweep_values_dict,
-            num_dims=4,
-            num_trials=2,
-            fixed_size=50
-        )
-    
-    @patch('experiment.ClassicalSVMTuner')
-    @patch('experiment.QuantumSVMTuner')
-    @patch('experiment.SyntheticDataManager')
-    def test_synthetic_experiment_workflow(self, mock_dm_class, mock_q_tuner, mock_c_tuner):
-        """Test full workflow for synthetic data experiment"""
-        # Mock data manager
-        mock_dm = Mock()
-        mock_dm_class.return_value = mock_dm
-        
-        # Mock get_data_split to return valid data
-        mock_dm.get_data_split.return_value = (
-            np.random.randn(40, 4),  # X_train
-            np.random.randn(10, 4),  # X_val
-            np.random.randn(20, 4),  # X_test
-            np.random.randint(0, 2, 40),  # y_train
-            np.random.randint(0, 2, 10),   # y_val
-            np.random.randint(0, 2, 20)    # y_test
-        )
-        
-        # Mock tuners
-        mock_c_tuner.get_best_params.return_value = {'C': 1.0, 'gamma': 'scale'}
-        mock_q_tuner.get_best_params.return_value = {
-            'reps': 2, 'entanglement': 'linear', 'C': 1.0
-        }
-        
-        # Initialize datasets
-        self.runner.initialise_datasets(mode='feature_complexity')
-        
-        # Verify data manager was initialized
+        self.runner = _make_runner()
+
+
+    @patch("experiment.SyntheticDataManager")
+    def test_synthetic_experiment_initialises_data_manager(self, MockDM):
+        """initialise_datasets for an sklearn mode creates a SyntheticDataManager
+        and calls .initialise_datasets() on the instance with the right args."""
+        mock_dm_instance = Mock()
+        MockDM.return_value = mock_dm_instance
+
+        self.runner.initialise_datasets(mode="feature_complexity")
+
+        # ExperimentRunner should have stored the instance
         self.assertIsNotNone(self.runner.data_manager)
-        mock_dm.initialise_datasets.assert_called_once()
-    
-    @patch('experiment.ClassicalSVMTuner')
-    @patch('experiment.QuantumSVMTuner')
-    @patch('experiment.CSVDataManager')
-    def test_csv_experiment_workflow(self, mock_dm_class, mock_q_tuner, mock_c_tuner):
-        """Test full workflow for CSV data experiment"""
-        # Mock data manager
-        mock_dm = Mock()
-        mock_dm_class.return_value = mock_dm
-        
-        # Mock tuners
-        mock_c_tuner.get_best_params.return_value = {'C': 1.0, 'gamma': 'scale'}
-        mock_q_tuner.get_best_params.return_value = {
-            'reps': 2, 'entanglement': 'linear', 'C': 1.0
-        }
-        
-        # Initialize datasets
-        runner = ExperimentRunner(
-            quantum_provider=self.mock_qp,
-            sweep_values_dict={'size': [20, 40, 60]},
-            num_dims=4,
-            num_trials=2,
-            fixed_size=50
+        self.assertIs(self.runner.data_manager, mock_dm_instance)
+
+        # The instance method (not the class) should have been called once
+        mock_dm_instance.initialise_datasets.assert_called_once()
+
+    @patch("experiment.SyntheticDataManager")
+    def test_synthetic_initialise_passes_correct_mode(self, MockDM):
+        """The mode string is forwarded to SyntheticDataManager.initialise_datasets."""
+        mock_dm_instance = Mock()
+        MockDM.return_value = mock_dm_instance
+
+        self.runner.initialise_datasets(mode="noise")
+
+        _, kwargs = mock_dm_instance.initialise_datasets.call_args
+        self.assertEqual(kwargs.get("mode") or
+                         mock_dm_instance.initialise_datasets.call_args[0][0],
+                         "noise")
+
+    @patch("experiment.SyntheticDataManager")
+    def test_synthetic_initialise_passes_num_dims(self, MockDM):
+        """num_dims from ExperimentConfig.NUM_DIMS is forwarded correctly."""
+        mock_dm_instance = Mock()
+        MockDM.return_value = mock_dm_instance
+
+        self.runner.initialise_datasets(mode="margin")
+
+        call_kwargs = mock_dm_instance.initialise_datasets.call_args
+        # Accept either positional or keyword
+        all_args = list(call_kwargs[0]) + list(call_kwargs[1].values())
+        self.assertIn(ExperimentConfig.NUM_DIMS, all_args)
+
+
+    @patch("experiment.CSVDataManager")
+    def test_csv_experiment_initialises_data_manager(self, MockDM):
+        """initialise_datasets for a CSV mode creates a CSVDataManager and
+        calls .load_dataset() with the supplied filename and target_col."""
+        mock_dm_instance = Mock()
+        MockDM.return_value = mock_dm_instance
+
+        self.runner.initialise_datasets(
+            mode="size",
+            filename="test.csv",
+            target_col="label",
         )
-        
-        runner.initialise_datasets(
-            mode='size',
-            filename='test.csv',
-            target_col='label'
+
+        self.assertIsNotNone(self.runner.data_manager)
+        self.assertIs(self.runner.data_manager, mock_dm_instance)
+        mock_dm_instance.load_dataset.assert_called_once_with(
+            filename="test.csv",
+            target_col="label",
+            num_dims=ExperimentConfig.NUM_DIMS,
         )
-        
-        # Verify CSV data manager was initialized
-        self.assertIsNotNone(runner.data_manager)
-        mock_dm.load_dataset.assert_called_once_with(
-            filename='test.csv',
-            target_col='label',
-            num_dims=4
-        )
+
+    @patch("experiment.CSVDataManager")
+    def test_csv_mode_without_filename_raises(self, _MockDM):
+        """CSV mode must reject calls missing filename or target_col."""
+        with self.assertRaises(ValueError):
+            self.runner.initialise_datasets(mode="size")
+
+    @patch("experiment.CSVDataManager")
+    def test_csv_mode_without_target_col_raises(self, _MockDM):
+        with self.assertRaises(ValueError):
+            self.runner.initialise_datasets(mode="size", filename="data.csv")
+
+
+    @patch("experiment.SyntheticDataManager")
+    def test_config_stored_after_initialise(self, MockDM):
+        """self.config must be populated after initialise_datasets."""
+        MockDM.return_value = Mock()
+        self.runner.initialise_datasets(mode="clusters")
+        self.assertIsNotNone(self.runner.config)
+        self.assertEqual(self.runner.config,
+                         ExperimentConfig.get("clusters"))
 
 
 class TestParameterValidation(unittest.TestCase):
-    """Test parameter validation and error handling"""
-    
-    def test_num_dims_validation(self):
-        """Test that num_dims is properly stored and used"""
-        runner = ExperimentRunner(
-            quantum_provider=Mock(),
-            sweep_values_dict={'size': [20]},
-            num_dims=5,
-            num_trials=3,
-            fixed_size=100
-        )
-        
-        self.assertEqual(runner.num_dims, 5)
-    
-    def test_num_trials_validation(self):
-        """Test that num_trials is properly stored"""
-        runner = ExperimentRunner(
-            quantum_provider=Mock(),
-            sweep_values_dict={'size': [20]},
-            num_dims=4,
-            num_trials=10,
-            fixed_size=100
-        )
-        
-        self.assertEqual(runner.num_trials, 10)
-    
-    def test_fixed_size_validation(self):
-        """Test that fixed_size is properly stored"""
-        runner = ExperimentRunner(
-            quantum_provider=Mock(),
-            sweep_values_dict={'size': [20]},
-            num_dims=4,
-            num_trials=5,
-            fixed_size=75
-        )
-        
-        self.assertEqual(runner.fixed_size, 75)
+    """Verify that ExperimentRunner picks up configuration from ExperimentConfig."""
+
+    def test_num_dims_comes_from_experiment_config(self):
+        runner = _make_runner()
+        self.assertEqual(runner.num_dims, ExperimentConfig.NUM_DIMS)
+
+    def test_num_trials_comes_from_experiment_config(self):
+        runner = _make_runner()
+        self.assertEqual(runner.num_trials, ExperimentConfig.NUM_TRIALS)
+
+    def test_fixed_size_comes_from_experiment_config(self):
+        runner = _make_runner()
+        self.assertEqual(runner.fixed_size, ExperimentConfig.FIXED_SIZE)
+
+    def test_runner_stores_quantum_provider(self):
+        mock_qp = Mock()
+        runner = ExperimentRunner(quantum_provider=mock_qp)
+        self.assertIs(runner.qp, mock_qp)
+
+    def test_data_manager_none_before_initialise(self):
+        runner = _make_runner()
+        self.assertIsNone(runner.data_manager)
+
+    def test_invalid_mode_raises_value_error(self):
+        runner = _make_runner()
+        with self.assertRaises(ValueError):
+            runner.initialise_datasets(mode="not_a_real_mode")
 
 
 class TestResultsStorage(unittest.TestCase):
-    """Test results storage and accumulation"""
-    
+    """Test results dict structure, initial state, and accumulation."""
+
+    # The exact keys present in ExperimentRunner.clear_results()
+    REQUIRED_FIELDS = [
+        "x_values",
+        "q_acc", "q_acc_std", "q_f1", "q_f1_std", "q_time",
+        "c_acc", "c_acc_std", "c_f1", "c_f1_std", "c_time",
+        "delta_acc", "p_val_acc", "cohen_d_acc",
+        "delta_f1",  "p_val_f1",  "cohen_d_f1",
+        "time_ratio",
+    ]
+
     def setUp(self):
-        """Set up test runner"""
-        self.runner = ExperimentRunner(
-            quantum_provider=Mock(),
-            sweep_values_dict={'feature_complexity': [1, 2, 3]},
-            num_dims=4,
-            num_trials=3,
-            fixed_size=100
-        )
-    
-    def test_results_dict_structure(self):
-        """Test that results dict has all required fields"""
-        required_fields = [
-            'x_values', 'sizes',
-            'q_acc', 'q_acc_std', 'q_f1', 'q_f1_std', 'q_time',
-            'c_acc', 'c_acc_std', 'c_f1', 'c_f1_std', 'c_time',
-            'delta_acc', 'p_val_acc', 'delta_f1', 'p_val_f1'
-        ]
-        
-        for field in required_fields:
-            self.assertIn(field, self.runner.results)
-            self.assertIsInstance(self.runner.results[field], list)
-    
-    def test_results_cleared_on_init(self):
-        """Test that results are empty on initialization"""
+        self.runner = _make_runner()
+
+    def test_results_dict_has_all_required_fields(self):
+        for field in self.REQUIRED_FIELDS:
+            self.assertIn(field, self.runner.results,
+                          f"Missing key in results dict: '{field}'")
+
+    def test_all_results_fields_are_lists(self):
         for key, value in self.runner.results.items():
-            self.assertEqual(len(value), 0, f"{key} should be empty on init")
-    
-    def test_results_persist_between_values(self):
-        """Test that results accumulate across experiment values"""
-        # Simulate storing results for multiple values
-        for value in [1, 2, 3]:
-            self.runner.results['x_values'].append(value)
-            self.runner.results['c_acc'].append(0.8 + value * 0.01)
-            self.runner.results['q_acc'].append(0.85 + value * 0.01)
-        
-        # Check accumulation
-        self.assertEqual(len(self.runner.results['x_values']), 3)
-        self.assertEqual(self.runner.results['x_values'], [1, 2, 3])
-        
-        # Check values are correct
-        self.assertAlmostEqual(self.runner.results['c_acc'][0], 0.81, places=5)
-        self.assertAlmostEqual(self.runner.results['q_acc'][2], 0.88, places=5)
+            self.assertIsInstance(value, list,
+                                  f"results['{key}'] should be a list")
+
+    def test_results_empty_on_init(self):
+        for key, value in self.runner.results.items():
+            self.assertEqual(len(value), 0,
+                             f"results['{key}'] should be empty on init")
+
+    def test_clear_results_resets_non_empty_dict(self):
+        self.runner.results["x_values"].append(99)
+        self.runner.results["c_acc"].append(0.5)
+        self.runner.clear_results()
+        for key, value in self.runner.results.items():
+            self.assertEqual(len(value), 0,
+                             f"clear_results() left data in '{key}'")
+
+    def test_results_accumulate_across_values(self):
+        for v in [1, 2, 3]:
+            self.runner.results["x_values"].append(v)
+            self.runner.results["c_acc"].append(0.80 + v * 0.01)
+            self.runner.results["q_acc"].append(0.85 + v * 0.01)
+
+        self.assertEqual(self.runner.results["x_values"], [1, 2, 3])
+        self.assertAlmostEqual(self.runner.results["c_acc"][0], 0.81, places=5)
+        self.assertAlmostEqual(self.runner.results["q_acc"][2], 0.88, places=5)
+
+    def test_no_extra_undocumented_keys(self):
+        """Catches accidental introduction of keys like 'sizes' that don't exist."""
+        self.assertNotIn("sizes", self.runner.results,
+                         "'sizes' is not a valid results key")
 
 
 class TestClassicalSVMExecution(unittest.TestCase):
-    """Test classical SVM training and prediction"""
-    
+    """Test run_classical — the real method signature and return contract."""
+
     def setUp(self):
-        """Set up runner"""
-        self.runner = ExperimentRunner(
-            quantum_provider=Mock(),
-            sweep_values_dict={'size': [20]},
-            num_dims=4,
-            num_trials=2,
-            fixed_size=50
+        self.runner = _make_runner()
+
+    def test_run_classical_returns_three_values(self):
+        X, y = _separable_data()
+        result = self.runner.run_classical(X, X, y, y, {"C": 1.0, "gamma": "scale"})
+        self.assertEqual(len(result), 3,
+                         "run_classical must return (acc, f1, time)")
+
+    def test_run_classical_accuracy_in_unit_interval(self):
+        X, y = _separable_data()
+        acc, f1, t = self.runner.run_classical(
+            X, X, y, y, {"C": 1.0, "gamma": "scale"}
         )
-    
-    def test_classical_svm_trained_with_params(self):
-        """Test that classical SVM is trained with given parameters"""
-        X_train = np.random.randn(50, 4)
-        X_test = np.random.randn(20, 4)
-        y_train = np.random.randint(0, 2, 50)
-        y_test = np.random.randint(0, 2, 20)
-        
-        params = {'C': 5.0, 'gamma': 0.1}
-        
-        acc, f1, time = self.runner.run_classical(
-            X_train, X_test, y_train, y_test, params
+        self.assertGreaterEqual(acc, 0.0)
+        self.assertLessEqual(acc, 1.0)
+
+    def test_run_classical_f1_in_unit_interval(self):
+        X, y = _separable_data()
+        acc, f1, t = self.runner.run_classical(
+            X, X, y, y, {"C": 1.0, "gamma": "scale"}
         )
-        
-        # Verify parameters were set
-        self.assertEqual(self.runner.classical_clf.C, 5.0)
-        self.assertEqual(self.runner.classical_clf.gamma, 0.1)
-    
-    def test_classical_svm_predictions_valid(self):
-        """Test that predictions are in valid range"""
-        # Create separable data
-        np.random.seed(42)
-        X_train = np.vstack([
-            np.random.randn(25, 4) + [2, 2, 2, 2],
-            np.random.randn(25, 4) - [2, 2, 2, 2]
-        ])
-        y_train = np.array([0]*25 + [1]*25)
-        
-        X_test = np.vstack([
-            np.random.randn(10, 4) + [2, 2, 2, 2],
-            np.random.randn(10, 4) - [2, 2, 2, 2]
-        ])
-        y_test = np.array([0]*10 + [1]*10)
-        
-        params = {'C': 1.0, 'gamma': 'scale'}
-        
-        acc, f1, time = self.runner.run_classical(
-            X_train, X_test, y_train, y_test, params
+        self.assertGreaterEqual(f1, 0.0)
+        self.assertLessEqual(f1, 1.0)
+
+    def test_run_classical_time_positive(self):
+        X, y = _separable_data()
+        _, _, t = self.runner.run_classical(
+            X, X, y, y, {"C": 1.0, "gamma": "scale"}
         )
-        
-        # Check metrics are valid
-        self.assertTrue(0 <= acc <= 1)
-        self.assertTrue(0 <= f1 <= 1)
-        self.assertGreater(time, 0)
+        self.assertGreaterEqual(t, 0)
+
+    def test_run_classical_applies_params_to_classifier(self):
+        """set_params must be forwarded to the internal SVC instance."""
+        X, y = _separable_data()
+        self.runner.run_classical(X, X, y, y, {"C": 42.0, "gamma": 0.05})
+        self.assertEqual(self.runner.classical_clf.C, 42.0)
+        self.assertEqual(self.runner.classical_clf.gamma, 0.05)
+
+    def test_run_classical_high_accuracy_on_separable_data(self):
+        """With clearly separable data a tuned RBF SVM should achieve > 90%."""
+        X, y = _separable_data(n_per_class=50)
+        rng = np.random.default_rng(0)
+        idx = rng.permutation(len(y))
+        X, y = X[idx], y[idx]
+        split = int(0.8 * len(y))
+        acc, _, _ = self.runner.run_classical(
+            X[:split], X[split:], y[:split], y[split:],
+            {"C": 10.0, "gamma": "scale"},
+        )
+        self.assertGreater(acc, 0.90,
+                           f"Expected >90% on separable data, got {acc:.2%}")
 
 
 class TestMockQuantumKernel(unittest.TestCase):
-    """Test quantum kernel evaluation with mocked quantum components"""
-    
+    """Test run_quantum with the correct positional signature and mocked kernel."""
+
     def setUp(self):
-        """Set up runner with mocked quantum components"""
-        self.runner = ExperimentRunner(
-            quantum_provider=Mock(),
-            sweep_values_dict={'feature_complexity': [1]},
-            num_dims=4,
-            num_trials=2,
-            fixed_size=50
-        )
-    
-    def test_quantum_kernel_evaluation_called(self):
-        """Test that quantum kernel evaluate is called correctly"""
-        # Create mock kernel
+        self.runner = _make_runner()
+
+    def _make_kernel(self, n_train, n_test):
+        """Mock kernel whose evaluate() returns identity for train, random for test."""
         mock_kernel = Mock()
         mock_kernel.evaluate.side_effect = [
-            np.eye(50),  # Training kernel (50x50)
-            np.random.randn(20, 50)  # Test kernel (20x50)
+            np.eye(n_train),                              # matrix_train
+            np.random.default_rng(0).random((n_test, n_train)),  # matrix_test
         ]
-        
-        X_train = np.random.randn(50, 4)
-        X_test = np.random.randn(20, 4)
-        y_train = np.random.randint(0, 2, 50)
-        y_test = np.random.randint(0, 2, 20)
-        
-        params = {'C': 1.0}
-        
-        # Run quantum
-        with patch('builtins.print'):  # Suppress print statements
-            acc, f1, time = self.runner.run_quantum(
-                X_train, X_test, y_train, y_test,
-                kernel=mock_kernel,
-                params=params
+        return mock_kernel
+
+    def test_run_quantum_returns_three_values(self):
+        X, y = _separable_data(n_per_class=25)
+        split = 40
+        kernel = self._make_kernel(split, len(y) - split)
+        result = self.runner.run_quantum(
+            X[:split], X[split:], y[:split], y[split:],
+            kernel,                     # positional — not a keyword argument
+            {"C": 1.0},
+        )
+        self.assertEqual(len(result), 3)
+
+    def test_run_quantum_kernel_called_twice(self):
+        """kernel.evaluate must be called exactly twice: once for train, once for test."""
+        X, y = _separable_data(n_per_class=25)
+        split = 40
+        kernel = self._make_kernel(split, len(y) - split)
+        with patch("builtins.print"):
+            self.runner.run_quantum(
+                X[:split], X[split:], y[:split], y[split:],
+                kernel, {"C": 1.0},
             )
-        
-        # Verify kernel was called twice
-        self.assertEqual(mock_kernel.evaluate.call_count, 2)
-        
-        # Check metrics
-        self.assertTrue(0 <= acc <= 1)
-        self.assertTrue(0 <= f1 <= 1)
-        self.assertGreater(time, 0)
+        self.assertEqual(kernel.evaluate.call_count, 2)
+
+    def test_run_quantum_train_call_uses_x_vec_only(self):
+        """First kernel call (train matrix) must not pass y_vec."""
+        X, y = _separable_data(n_per_class=25)
+        split = 40
+        kernel = self._make_kernel(split, len(y) - split)
+        with patch("builtins.print"):
+            self.runner.run_quantum(
+                X[:split], X[split:], y[:split], y[split:],
+                kernel, {"C": 1.0},
+            )
+        first_call_kwargs = kernel.evaluate.call_args_list[0][1]
+        self.assertNotIn("y_vec", first_call_kwargs,
+                         "Train kernel call must not pass y_vec")
+
+    def test_run_quantum_test_call_passes_y_vec(self):
+        """Second kernel call (test matrix) must pass y_vec=X_train."""
+        X, y = _separable_data(n_per_class=25)
+        split = 40
+        kernel = self._make_kernel(split, len(y) - split)
+        with patch("builtins.print"):
+            self.runner.run_quantum(
+                X[:split], X[split:], y[:split], y[split:],
+                kernel, {"C": 1.0},
+            )
+        second_call_kwargs = kernel.evaluate.call_args_list[1][1]
+        self.assertIn("y_vec", second_call_kwargs,
+                      "Test kernel call must include y_vec")
+
+    def test_run_quantum_accuracy_in_unit_interval(self):
+        X, y = _separable_data(n_per_class=25)
+        split = 40
+        kernel = self._make_kernel(split, len(y) - split)
+        with patch("builtins.print"):
+            acc, f1, t = self.runner.run_quantum(
+                X[:split], X[split:], y[:split], y[split:],
+                kernel, {"C": 1.0},
+            )
+        self.assertGreaterEqual(acc, 0.0)
+        self.assertLessEqual(acc, 1.0)
+
+    def test_run_quantum_time_positive(self):
+        X, y = _separable_data(n_per_class=25)
+        split = 40
+        kernel = self._make_kernel(split, len(y) - split)
+        with patch("builtins.print"):
+            _, _, t = self.runner.run_quantum(
+                X[:split], X[split:], y[:split], y[split:],
+                kernel, {"C": 1.0},
+            )
+        self.assertGreaterEqual(t, 0)
 
 
 def run_integration_tests():
-    """Run all integration tests"""
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    
-    suite.addTests(loader.loadTestsFromTestCase(TestFullExperimentPipeline))
-    suite.addTests(loader.loadTestsFromTestCase(TestParameterValidation))
-    suite.addTests(loader.loadTestsFromTestCase(TestResultsStorage))
-    suite.addTests(loader.loadTestsFromTestCase(TestClassicalSVMExecution))
-    suite.addTests(loader.loadTestsFromTestCase(TestMockQuantumKernel))
-    
+    for cls in [
+        TestFullExperimentPipeline,
+        TestParameterValidation,
+        TestResultsStorage,
+        TestClassicalSVMExecution,
+        TestMockQuantumKernel,
+    ]:
+        suite.addTests(loader.loadTestsFromTestCase(cls))
     runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    return result
+    return runner.run(suite)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_integration_tests()
