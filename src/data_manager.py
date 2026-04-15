@@ -213,6 +213,20 @@ class CSVDataManager():
             print(f"Warning: Only {self.X.shape[1]} features available, reducing num_dims to {self.X.shape[1]}")
             self.num_dims = self.X.shape[1]
     
+    def preprocess_data(self, X_train, X_val, X_test):
+        preprocessing_pipeline = Pipeline([
+            ('std_scaler', StandardScaler()),
+            ('pca', PCA(n_components=self.num_dims)),
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
+        ])
+        
+        # Fit on X_train, transform all
+        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
+        X_test_processed = preprocessing_pipeline.transform(X_test)
+        X_val_processed = preprocessing_pipeline.transform(X_val)
+        
+        return X_train_processed, X_val_processed, X_test_processed
+    
     def get_kfold_splits(self, seed, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
@@ -226,27 +240,15 @@ class CSVDataManager():
         
         # Split X_pool into training and validation folds
         for train_idx, val_idx in skf.split(X_pool, y_pool):
-            X_train_raw, X_val_raw = X_pool[train_idx], X_pool[val_idx]
-            y_train_raw, y_val = y_pool[train_idx], y_pool[val_idx]
+            X_train, X_val = X_pool[train_idx], X_pool[val_idx]
+            y_train, y_val = y_pool[train_idx], y_pool[val_idx]
             
-            preprocessing_pipeline = Pipeline([
-                ('std_scaler', StandardScaler()),
-                ('pca', PCA(n_components=self.num_dims)), 
-                ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
-            ])
-            
-            X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
-            X_test_processed = preprocessing_pipeline.transform(X_test)
-            X_val_processed = preprocessing_pipeline.transform(X_val_raw)
-            
-            # 4. Safety Check: Cap test set size to prevent Quantum simulation timeouts
-            # if len(y_test) > self.max_test_size:
-            #     rng = np.random.default_rng(seed)
-            #     idx = rng.choice(len(y_test), self.max_test_size, replace=False)
-            #     X_test_processed, y_test = X_test_processed[idx], y_test[idx]
+            X_train_processed, X_val_processed, X_test_processed = self.preprocess_data(
+                X_train=X_train, X_val=X_val, X_test=X_test 
+            )
                 
             # Yield the fold to the experiment runner
-            yield X_train_processed, X_val_processed, X_test_processed, y_train_raw, y_val, y_test
+            yield X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
             
     def get_data_split(self, seed):
         """Create train/test/validation split with preprocessing"""
@@ -260,17 +262,9 @@ class CSVDataManager():
             X_pool, y_pool, test_size=0.2, random_state=seed, stratify=y_pool
         )
         
-        # Preprocessing pipeline
-        preprocessing_pipeline = Pipeline([
-            ('std_scaler', StandardScaler()),
-            ('pca', PCA(n_components=self.num_dims)),
-            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
-        ])
-        
-        # Fit on X_train, transform all
-        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
-        X_test_processed = preprocessing_pipeline.transform(X_test)
-        X_val_processed = preprocessing_pipeline.transform(X_val)
+        X_train_processed, X_val_processed, X_test_processed = self.preprocess_data(
+            X_train=X_train, X_val=X_val, X_test=X_test
+        )
         
         return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
     
@@ -379,7 +373,19 @@ class SyntheticDataManager():
             self.create_dataset(**params)
         
         return self.datasets_dict
-     
+    
+    def preprocess_data(self, X_train, X_val, X_test):
+        preprocessing_pipeline = Pipeline([
+            ('std_scaler', StandardScaler()), 
+            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
+        ])
+        
+        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
+        X_test_processed = preprocessing_pipeline.transform(X_test)
+        X_val_processed = preprocessing_pipeline.transform(X_val)
+        
+        return X_train_processed, X_val_processed, X_test_processed
+    
     def get_kfold_splits(self, seed, label, k_folds=5):
         """
         Generator that yields k mutually exclusive splits of the data.
@@ -395,26 +401,15 @@ class SyntheticDataManager():
         
         # Split X_pool into training and validation folds
         for train_idx, val_idx in skf.split(X_pool, y_pool):
-            X_train_raw, X_val_raw = X_pool[train_idx], X_pool[val_idx]
-            y_train_raw, y_val = y_pool[train_idx], y_pool[val_idx]
+            X_train, X_val = X_pool[train_idx], X_pool[val_idx]
+            y_train, y_val = y_pool[train_idx], y_pool[val_idx]
             
-            preprocessing_pipeline = Pipeline([
-                ('std_scaler', StandardScaler()),
-                ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
-            ])
-            
-            X_train_processed = preprocessing_pipeline.fit_transform(X_train_raw)
-            X_test_processed = preprocessing_pipeline.transform(X_test)
-            X_val_processed = preprocessing_pipeline.transform(X_val_raw)
-            
-            # 4. Safety Check: Cap test set size to prevent Quantum simulation timeouts
-            # if len(y_test) > self.max_test_size:
-            #     rng = np.random.default_rng(seed)
-            #     idx = rng.choice(len(y_test), self.max_test_size, replace=False)
-            #     X_test_processed, y_test = X_test_processed[idx], y_test[idx]
+            X_train_processed, X_val_processed, X_test_processed = self.preprocess_data(
+                X_train=X_train, X_val=X_val, X_test=X_test
+            )
                 
             # Yield the fold to the experiment runner
-            yield X_train_processed, X_val_processed, X_test_processed, y_train_raw, y_val, y_test
+            yield X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
             
     def get_data_split(self, seed, label):
         """Create train/test/validation split with preprocessing"""
@@ -431,13 +426,8 @@ class SyntheticDataManager():
         )
         
         # Preprocessing
-        preprocessing_pipeline = Pipeline([
-            ('std_scaler', StandardScaler()), 
-            ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
-        ])
-        
-        X_train_processed = preprocessing_pipeline.fit_transform(X_train)
-        X_test_processed = preprocessing_pipeline.transform(X_test)
-        X_val_processed = preprocessing_pipeline.transform(X_val)
+        X_train_processed, X_val_processed, X_test_processed = self.preprocess_data(
+            X_train=X_train, X_val=X_val, X_test=X_test
+        )
         
         return X_train_processed, X_val_processed, X_test_processed, y_train, y_val, y_test
