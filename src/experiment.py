@@ -305,7 +305,7 @@ class ExperimentRunner():
         
         # Phase 4: Plot results after all values complete
         self.plot_results(self.config)
-        save_dir, _ = self._get_output_meta(self.config)
+        save_dir, _ = self._get_output_meta()
         
         df = pd.DataFrame(self.results)
         df.to_csv(os.path.join(save_dir, 'summary_metrics.csv'), index=False)
@@ -650,7 +650,7 @@ class ExperimentRunner():
         print(full_report)
         
         # Unpack the tuple to safely get JUST the directory path
-        save_dir, _ = self._get_output_meta(self.config)
+        save_dir, _ = self._get_output_meta()
         log_file = os.path.join(save_dir, 'detailed_report.txt')
         
         # Append to detailed_report.txt in your results folder
