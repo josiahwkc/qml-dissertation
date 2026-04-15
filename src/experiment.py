@@ -496,8 +496,7 @@ class ExperimentRunner():
         print(f"Executing Monte Carlo Sub-Sampling ({self.num_trials} trials)...")
         
         for trial in range(self.num_trials):
-            X_pool, X_val, X_test, y_pool, y_val, y_test = \
-                self.data_manager.get_data_split(seed=trial)
+            X_pool, X_val, X_test, y_pool, y_val, y_test = self.data_manager.get_data_split(seed=trial)
             
             train_size = value if mode in ['size', 'quantum_benchmark'] else self.fixed_size
             imbalance = value if mode == 'imbalance' else 0.5
