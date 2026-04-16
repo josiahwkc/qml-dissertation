@@ -160,7 +160,7 @@ class ExperimentRunner():
         self.fixed_size = ExperimentConfig.FIXED_SIZE
         self.config = None
         
-        self.classical_clf = SVC(kernel='rbf')
+        # self.classical_clf = SVC(kernel='rbf')
         self.data_manager = None
         self.clear_results()
         
@@ -225,15 +225,15 @@ class ExperimentRunner():
             'time_ratio': []
         }
        
-    def run_classical(self, X_train, X_test, y_train, y_test, params):
+    def run_classical(self, X_train, X_test, y_train, y_test, kernel, params):
         """Runs Classical SVM (RBF Kernel) with locked parameters"""        
-        self.classical_clf.set_params(**params)
+        kernel.set_params(**params)
     
         start_time = time.time()
-        self.classical_clf.fit(X_train, y_train)
+        kernel.fit(X_train, y_train)
         end_time = time.time()
         
-        y_pred = self.classical_clf.predict(X_test)
+        y_pred = kernel.predict(X_test)
         
         score = metrics.accuracy_score(y_test, y_pred)
         f1 = metrics.f1_score(y_test, y_pred, average='weighted')
@@ -280,14 +280,16 @@ class ExperimentRunner():
         # Phase 1: Tune hyperparameters  
         c_params, q_params = self._tune_hyperparameters(mode)
 
-        # Phase 2: Build quantum kernel once
-        # shared_kernel = self._build_quantum_kernel(q_params)
+        # Phase 2: Build kernels once
+        c_kernel = SVC(kernel='rbf')
+        
+        # q_kernel = self._build_quantum_kernel(q_params)
         feature_map = ZZFeatureMap(
             feature_dimension=self.num_dims,
             reps=q_params['reps'],
             entanglement=q_params['entanglement'],
         )
-        shared_kernel = FidelityQuantumKernel(feature_map=feature_map)
+        q_kernel = FidelityQuantumKernel(feature_map=feature_map)
         
         
         # Phase 3: Run trials for each sweep value
@@ -300,7 +302,8 @@ class ExperimentRunner():
                 value=value,
                 c_params=c_params,
                 q_params=q_params,
-                shared_kernel=shared_kernel
+                c_kernel=c_kernel,
+                q_kernel=q_kernel
             )
         
         # Phase 4: Plot results after all values complete
@@ -453,7 +456,7 @@ class ExperimentRunner():
         
         return kernel
 
-    def _run_trials_for_value(self, mode, value, c_params, q_params, shared_kernel):
+    def _run_trials_for_value(self, mode, value, c_params, q_params, c_kernel, q_kernel):
         """Run all trials for a single sweep value"""
         print(f"\n{'-'*80}")
         print(f"RUNNING: {self.config['value_name']} = {value}")
@@ -463,7 +466,7 @@ class ExperimentRunner():
         data_iterator = self._get_data_iterator(mode, value)
         
         # Run trials and collect results
-        c_data, q_data = self._run_trials(data_iterator, c_params, q_params, shared_kernel)
+        c_data, q_data = self._run_trials(data_iterator, c_params, q_params, c_kernel, q_kernel)
         
         # Calculate and display statistics
         self._process_results(
@@ -493,8 +496,7 @@ class ExperimentRunner():
         print(f"Executing Monte Carlo Sub-Sampling ({self.num_trials} trials)...")
         
         for trial in range(self.num_trials):
-            X_pool, X_val, X_test, y_pool, y_val, y_test = \
-                self.data_manager.get_data_split(seed=trial)
+            X_pool, X_val, X_test, y_pool, y_val, y_test = self.data_manager.get_data_split(seed=trial)
             
             train_size = value if mode in ['size', 'quantum_benchmark'] else self.fixed_size
             imbalance = value if mode == 'imbalance' else 0.5
@@ -509,7 +511,7 @@ class ExperimentRunner():
             
             yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
     
-    def _run_trials(self, data_iterator, c_params, q_params, shared_kernel):
+    def _run_trials(self, data_iterator, c_params, q_params, c_kernel, q_kernel):
         """Execute all trials and collect results"""
         c_data = {'acc': [], 'f1': [], 'time': []}
         q_data = {'acc': [], 'f1': [], 'time': []}
@@ -524,7 +526,8 @@ class ExperimentRunner():
             
             # Run classical
             c_acc, c_f1, c_time = self.run_classical(
-                X_train, X_test, y_train, y_test, params=c_params
+                X_train, X_test, y_train, y_test, 
+                kernel=c_kernel, params=c_params
             )
             c_data['acc'].append(c_acc)
             c_data['f1'].append(c_f1)
@@ -533,7 +536,7 @@ class ExperimentRunner():
             # Run quantum
             q_acc, q_f1, q_time = self.run_quantum(
                 X_train, X_test, y_train, y_test,
-                kernel=shared_kernel, params=q_params
+                kernel=q_kernel, params=q_params
             )
             q_data['acc'].append(q_acc)
             q_data['f1'].append(q_f1)

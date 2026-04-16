@@ -44,4 +44,5 @@ Thumbs.db
 
 /junk
 *.png
+.coverage
 detailed_report.txt

@@ -1,9 +1,18 @@
-matplotlib==3.10.8
+# Core dependencies
 numpy==2.4.2
-pandas==3.0.1
-qiskit==1.4.5
-qiskit-aer==0.15.1
-qiskit_machine_learning==0.8.4
 scikit_learn==1.8.0
 scipy==1.15.3
+pandas==3.0.1
+matplotlib==3.10.8
+
+# Quantum dependencies
+qiskit==1.4.5
+qiskit_machine_learning==0.8.4
+qiskit-aer==0.15.1
+
+# Testing and development (optional, can be separate)
+coverage>=6.0
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
 seaborn==0.13.2
