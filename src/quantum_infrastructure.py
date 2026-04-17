@@ -5,15 +5,21 @@ from qiskit_machine_learning.kernels import FidelityQuantumKernel
 
 class QuantumProvider:
     def __init__(self, shots=1024, use_gpu=False):
-        self.kernel = None
-        
         device = 'GPU' if use_gpu else 'CPU'
-        self.backend = AerSimulator(method='statevector', device=device)
         
         self.sampler = AerSampler(default_shots=shots)
+        self.sampler.options.backend_options = {
+            "method": "statevector",
+            "device": device
+        }
         
         self.fidelity = ComputeUncompute(sampler=self.sampler)
-        print(f"Full Aer Stack initialized on {device} with {shots} shots.\n")
+        
+        actual_shots = self.sampler.default_shots
+        backend_opts = self.sampler.options.backend_options
+        actual_device = backend_opts.get("device", "CPU")
+        
+        print(f"Quantum stack initialised on {actual_device} with {actual_shots} shots.\n")
 
     def get_kernel(self, feature_map):
         """Returns a FidelityQuantumKernel using the full Sampler stack."""
