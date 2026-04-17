@@ -57,7 +57,7 @@ class ExperimentConfig:
             'value_name': 'Training Size',
             'data_source': DATA_SOURCE_CSV,
             'requires_file': True,
-            'sweep_values': [10, 50, 100, 150, 200, 250, 300],
+            'sweep_values': [50, 100, 150, 200, 250, 300],
             'description': 'Vary training set size on real data'
         },
         'imbalance': {
@@ -66,7 +66,7 @@ class ExperimentConfig:
             'value_name': 'Ratio',
             'data_source': DATA_SOURCE_CSV,
             'requires_file': True,
-            'sweep_values': True,
+            'sweep_values': [0.5, 0.6, 0.7, 0.8, 0.9],
             'description': 'Vary class imbalance ratio on real data'
         },
         
@@ -446,7 +446,7 @@ class ExperimentRunner():
             num_dims=self.num_dims,
             reps=q_params['reps'],
             entanglement=q_params['entanglement'],
-            backend=self.qp.backend
+            sampler=self.qp.sampler
         )
         
         kernel = self.qp.get_kernel(optimized_fm)
