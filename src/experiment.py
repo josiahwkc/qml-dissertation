@@ -123,7 +123,7 @@ class ExperimentConfig:
             'value_name': 'Training Size',
             'data_source': DATA_SOURCE_QISKIT,
             'requires_file': False,
-            'sweep_values': [10, 50, 100],
+            'sweep_values': [50, 100, 150, 200, 250, 300],
             'sweep_parameter': 'gap',
             'description': 'Qiskit ad_hoc_data optimized for ZZFeatureMap',
             'fixed_dims': 2,  # ad_hoc_data only allows 2 or 3 dimensions
@@ -226,9 +226,7 @@ class ExperimentRunner():
         }
        
     def run_classical(self, X_train, X_test, y_train, y_test, kernel, params):
-        """Runs Classical SVM (RBF Kernel) with locked parameters"""        
-        kernel.set_params(**params)
-    
+        """Runs Classical SVM (RBF Kernel) with locked parameters"""            
         start_time = time.time()
         kernel.fit(X_train, y_train)
         end_time = time.time()
@@ -281,7 +279,11 @@ class ExperimentRunner():
         c_params, q_params = self._tune_hyperparameters(mode)
 
         # Phase 2: Build kernels once
-        c_kernel = SVC(kernel='rbf')
+        c_kernel = SVC(
+            kernel='rbf',
+            C=c_params['C'],
+            gamma=c_params['gamma']
+        )
         
         # q_kernel = self._build_quantum_kernel(q_params)
         feature_map = ZZFeatureMap(
