@@ -23,4 +23,4 @@ class QuantumProvider:
 
     def get_kernel(self, feature_map):
         """Returns a FidelityQuantumKernel using the full Sampler stack."""
-        return FidelityQuantumKernel(fidelity=self.fidelity, feature_map=feature_map)
+        return FidelityQuantumKernel(fidelity=self.fidelity, feature_map=feature_map, max_circuits_per_job=50)
