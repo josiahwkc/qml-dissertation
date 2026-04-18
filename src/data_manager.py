@@ -324,6 +324,20 @@ class SyntheticDataManager():
         
         return X, y
     
+    def create_circles(self, label, n_samples=500, noise=None, factor=0.8):
+        if label in self.datasets_dict:
+            print(f"Warning: Dataset '{label}' already exists. Overwriting...")
+            
+        X, y = datasets.make_circles(
+            n_samples=n_samples,
+            noise=noise,
+            factor=factor
+        )
+        
+        self.datasets_dict[label] = (X, y)
+        
+        return X, y
+    
     def initialise_datasets(self, mode, num_dims, sweep_values, 
                            n_classes=2, n_samples=500, random_state=42):
         """
