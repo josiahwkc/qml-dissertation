@@ -47,3 +47,4 @@ Thumbs.db
 *.png
 .coverage
 detailed_report.txt
+visualisations.py
