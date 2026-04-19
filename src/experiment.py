@@ -71,7 +71,7 @@ class ExperimentConfig:
         },
         
         # =====================================================================
-        # SKLEARN SYNTHETIC MODES (make_classification)
+        # SKLEARN SYNTHETIC MODES (make_classification, make_blobs)
         # =====================================================================
         'feature_complexity': {
             'x_label': 'Informative Features',
@@ -112,6 +112,26 @@ class ExperimentConfig:
             'sweep_values': [0.0, 0.05, 0.10, 0.15, 0.20],
             'sweep_parameter': 'flip_y',
             'description': 'Vary label noise in synthetic data'
+        },
+        'inter_distance': {
+            'x_label': 'Inter-class Distance',
+            'title_suffix': 'vs Inter-class Distance',
+            'value_name': 'Centroid Distance',
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [1.4, 1.2, 1.0, 0.8, 0.6],  # Decreasing distance = higher entanglement
+            'sweep_parameter': 'inter_distance',
+            'description': 'Vary the spatial distance between class centroids'
+        },
+        'intra_spread': {
+            'x_label': 'Intra-class Variance (Std Dev)',
+            'title_suffix': 'vs Intra-class Variance',
+            'value_name': 'Cluster Spread',
+            'data_source': DATA_SOURCE_SKLEARN, 
+            'requires_file': False,
+            'sweep_values': [0.5, 1.0, 1.5, 2.0, 3.0],  # Increasing spread = higher entanglement
+            'sweep_parameter': 'cluster_std',
+            'description': 'Vary the spatial scatter of points within each class'
         },
         
         # =====================================================================
@@ -405,14 +425,14 @@ class ExperimentRunner():
         c_params = ClassicalSVMTuner.get_best_params(
             X_train, X_val, y_train, y_val,
             cache_key=f"classical_{mode}_baseline",
-            verbose=False
+            verbose=True
         )
         
         # Tune quantum
         q_params = QuantumSVMTuner.get_best_params(
             X_train, X_val, y_train, y_val, self.num_dims,
             cache_key=f"quantum_{mode}_baseline",
-            verbose=False
+            verbose=True
         )
         
         print("\n" + "-"*80)
