@@ -45,6 +45,7 @@ Thumbs.db
 
 /junk
 *.png
+*.pdf
 .coverage
 detailed_report.txt
 visualisations.py
