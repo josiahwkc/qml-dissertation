@@ -329,14 +329,14 @@ class ExperimentRunner():
             )
         
         # Phase 4: Plot results after all values complete
-        self.plot_results(self.config)
+        self.plot_results()
         save_dir, _ = self._get_output_meta()
         
         df = pd.DataFrame(self.results)
         df.to_csv(os.path.join(save_dir, 'summary_metrics.csv'), index=False)
         print(f"Data saved to {save_dir}/summary_metrics.csv")
     
-    def plot_results(self, config):
+    def plot_results(self):
         """Generate, save, and display individual comparison plots"""
         
         save_dir, dataset_name = self._get_output_meta()
@@ -346,8 +346,8 @@ class ExperimentRunner():
         print(f"\nSaving plots to: {save_dir}/")
         
         
-        x_label = config['x_label']
-        title_suffix = config['title_suffix']
+        x_label = self.config['x_label']
+        title_suffix = self.config['title_suffix']
         
         # 1. Accuracy Plot
         plt.figure(figsize=(8, 6))
