@@ -9,7 +9,7 @@ from data_manager import CSVDataManager
 
 def plot_results_from_csv(csv_path, dataset_name, x_label, title_suffix):
     """
-    Reads experimental results from a CSV file and displays individual comparison plots.
+    Reads experimental results from a CSV file and displays them as subplots in a single figure.
     
     Args:
         csv_path (str): Path to the CSV file containing the results.
@@ -20,57 +20,51 @@ def plot_results_from_csv(csv_path, dataset_name, x_label, title_suffix):
     # Load the results from the CSV file
     df = pd.read_csv(csv_path)
     
-    # Ensure the dataframe has the expected columns. 
-    # If your CSV uses different names (e.g., 'Train Size' instead of 'x_values'), 
-    # you can rename them here: df = df.rename(columns={'Train Size': 'x_values', ...})
+    # Create a figure with 1 row and 3 columns of subplots
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
     
-    # 1. Accuracy Plot
-    plt.figure(figsize=(8, 6))
-    plt.errorbar(df['x_values'], df['c_acc'], 
+    # 1. Accuracy Plot (ax1)
+    ax1.errorbar(df['x_values'], df['c_acc'], 
                  yerr=df['c_acc_std'], fmt='o-', capsize=5, 
                  label='Classical', color='blue')
-    plt.errorbar(df['x_values'], df['q_acc'], 
+    ax1.errorbar(df['x_values'], df['q_acc'], 
                  yerr=df['q_acc_std'], fmt='s-', capsize=5, 
                  label='Quantum', color='purple')
     
-    plt.title(f'Accuracy {title_suffix} ({dataset_name})')
-    plt.xlabel(x_label)
-    plt.ylabel('Accuracy')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    ax1.set_title(f'Accuracy {title_suffix} ({dataset_name})')
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel('Accuracy')
+    ax1.legend()
+    ax1.grid(True)
     
-    # 2. F1 Score Plot
-    plt.figure(figsize=(8, 6))
-    plt.errorbar(df['x_values'], df['c_f1'], 
+    # 2. F1 Score Plot (ax2)
+    ax2.errorbar(df['x_values'], df['c_f1'], 
                  yerr=df['c_f1_std'], fmt='o-', capsize=5, 
                  label='Classical', color='blue')
-    plt.errorbar(df['x_values'], df['q_f1'], 
+    ax2.errorbar(df['x_values'], df['q_f1'], 
                  yerr=df['q_f1_std'], fmt='s-', capsize=5, 
                  label='Quantum', color='purple')
     
-    plt.title(f'F1 Score {title_suffix} ({dataset_name})')
-    plt.xlabel(x_label)
-    plt.ylabel('F1 Score')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    ax2.set_title(f'F1 Score {title_suffix} ({dataset_name})')
+    ax2.set_xlabel(x_label)
+    ax2.set_ylabel('F1 Score')
+    ax2.legend()
+    ax2.grid(True)
     
-    # 3. Training Time Plot
-    plt.figure(figsize=(8, 6))
-    plt.plot(df['x_values'], df['c_time'], 
+    # 3. Training Time Plot (ax3)
+    ax3.plot(df['x_values'], df['c_time'], 
              'o-', label='Classical', color='blue')
-    plt.plot(df['x_values'], df['q_time'], 
+    ax3.plot(df['x_values'], df['q_time'], 
              's-', label='Quantum', color='purple')
     
-    plt.title(f'Training Time {title_suffix} ({dataset_name})')
-    plt.yscale('log')
-    plt.xlabel(x_label)
-    plt.ylabel('Time (s)')
-    plt.legend()
-    plt.grid(True)
+    ax3.set_title(f'Training Time {title_suffix} ({dataset_name})')
+    ax3.set_yscale('log')
+    ax3.set_xlabel(x_label)
+    ax3.set_ylabel('Time (s)')
+    ax3.legend()
+    ax3.grid(True)
+    
+    # Adjust layout so titles and labels don't overlap, then display
     plt.tight_layout()
     plt.show()
 
