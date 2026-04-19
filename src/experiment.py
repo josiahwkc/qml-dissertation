@@ -405,6 +405,42 @@ class ExperimentRunner():
         plt.savefig(os.path.join(save_dir, 'training_time.pdf'), format='pdf', dpi=300)
         plt.show()
         
+        fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+        fig.suptitle(f'Summary Results: {dataset_name} {title_suffix}', fontsize=16)
+
+        # Subplot 1: Accuracy
+        axes[0].errorbar(self.results['x_values'], self.results['c_acc'], yerr=self.results['c_acc_std'], 
+                         fmt='o-', capsize=5, label='Classical', color='blue')
+        axes[0].errorbar(self.results['x_values'], self.results['q_acc'], yerr=self.results['q_acc_std'], 
+                         fmt='s-', capsize=5, label='Quantum', color='purple')
+        axes[0].set_title('Accuracy')
+        axes[0].set_ylabel('Accuracy')
+
+        # Subplot 2: F1 Score
+        axes[1].errorbar(self.results['x_values'], self.results['c_f1'], yerr=self.results['c_f1_std'], 
+                         fmt='o-', capsize=5, label='Classical', color='blue')
+        axes[1].errorbar(self.results['x_values'], self.results['q_f1'], yerr=self.results['q_f1_std'], 
+                         fmt='s-', capsize=5, label='Quantum', color='purple')
+        axes[1].set_title('F1 Score')
+        axes[1].set_ylabel('F1 Score')
+
+        # Subplot 3: Training Time
+        axes[2].plot(self.results['x_values'], self.results['c_time'], 'o-', label='Classical', color='blue')
+        axes[2].plot(self.results['x_values'], self.results['q_time'], 's-', label='Quantum', color='purple')
+        axes[2].set_title('Training Time')
+        axes[2].set_ylabel('Time (s)')
+        axes[2].set_yscale('log')
+
+        # Formatting for all subplots
+        for ax in axes:
+            ax.set_xlabel(x_label)
+            ax.legend()
+            ax.grid(True)
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust for the suptitle
+        plt.savefig(os.path.join(save_dir, 'combined_results.pdf'), format='pdf', dpi=300)
+        plt.show()
+        
     def _tune_hyperparameters(self, mode):
         """
         Tune hyperparameters on baseline dataset.
@@ -425,14 +461,14 @@ class ExperimentRunner():
         c_params = ClassicalSVMTuner.get_best_params(
             X_train, X_val, y_train, y_val,
             cache_key=f"classical_{mode}_baseline",
-            verbose=True
+            verbose=False
         )
         
         # Tune quantum
         q_params = QuantumSVMTuner.get_best_params(
             X_train, X_val, y_train, y_val, self.num_dims,
             cache_key=f"quantum_{mode}_baseline",
-            verbose=True
+            verbose=False
         )
         
         print("\n" + "-"*80)
