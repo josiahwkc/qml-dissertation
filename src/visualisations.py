@@ -7,6 +7,73 @@ from sklearn.preprocessing import StandardScaler
 
 from data_manager import CSVDataManager
 
+def plot_results_from_csv(csv_path, dataset_name, x_label, title_suffix):
+    """
+    Reads experimental results from a CSV file and displays individual comparison plots.
+    
+    Args:
+        csv_path (str): Path to the CSV file containing the results.
+        dataset_name (str): Name of the dataset for the plot titles (e.g., 'Fashion MNIST').
+        x_label (str): Label for the x-axis (e.g., 'Training Size').
+        title_suffix (str): Suffix for the plot titles (e.g., 'vs Training Size').
+    """
+    # Load the results from the CSV file
+    df = pd.read_csv(csv_path)
+    
+    # Ensure the dataframe has the expected columns. 
+    # If your CSV uses different names (e.g., 'Train Size' instead of 'x_values'), 
+    # you can rename them here: df = df.rename(columns={'Train Size': 'x_values', ...})
+    
+    # 1. Accuracy Plot
+    plt.figure(figsize=(8, 6))
+    plt.errorbar(df['x_values'], df['c_acc'], 
+                 yerr=df['c_acc_std'], fmt='o-', capsize=5, 
+                 label='Classical', color='blue')
+    plt.errorbar(df['x_values'], df['q_acc'], 
+                 yerr=df['q_acc_std'], fmt='s-', capsize=5, 
+                 label='Quantum', color='purple')
+    
+    plt.title(f'Accuracy {title_suffix} ({dataset_name})')
+    plt.xlabel(x_label)
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    
+    # 2. F1 Score Plot
+    plt.figure(figsize=(8, 6))
+    plt.errorbar(df['x_values'], df['c_f1'], 
+                 yerr=df['c_f1_std'], fmt='o-', capsize=5, 
+                 label='Classical', color='blue')
+    plt.errorbar(df['x_values'], df['q_f1'], 
+                 yerr=df['q_f1_std'], fmt='s-', capsize=5, 
+                 label='Quantum', color='purple')
+    
+    plt.title(f'F1 Score {title_suffix} ({dataset_name})')
+    plt.xlabel(x_label)
+    plt.ylabel('F1 Score')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    
+    # 3. Training Time Plot
+    plt.figure(figsize=(8, 6))
+    plt.plot(df['x_values'], df['c_time'], 
+             'o-', label='Classical', color='blue')
+    plt.plot(df['x_values'], df['q_time'], 
+             's-', label='Quantum', color='purple')
+    
+    plt.title(f'Training Time {title_suffix} ({dataset_name})')
+    plt.yscale('log')
+    plt.xlabel(x_label)
+    plt.ylabel('Time (s)')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 def plot_dataset_comparison(datasets_dict, title="Qualitative Dataset Comparison (2D PCA Projection)"):
     """
     Plots a side-by-side comparison of multiple datasets using their first 2 PCA components.
