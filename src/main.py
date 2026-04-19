@@ -15,7 +15,7 @@ from quantum_infrastructure import QuantumProvider
 
 def main():
     print("Choose an experiment mode:")
-    print("['size', 'imbalance', 'feature_complexity', 'margin', 'clusters', 'noise', or 'quantum_benchmark']\n")
+    print("['size', 'imbalance', 'feature_complexity', 'margin', 'clusters', 'noise', 'inter_distance', 'intra_spread, or 'quantum_benchmark']\n")
     experiment_mode = input()
     
     provider = QuantumProvider()
