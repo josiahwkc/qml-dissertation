@@ -324,13 +324,49 @@ class SyntheticDataManager():
         
         return X, y
     
+    def create_variance_dataset(self, label, n_features, inter_distance=2.0, intra_spread=1.0, n_samples=500, random_state=42):
+        """
+        Generates a synthetic dataset to test the intra/inter variance hypothesis.
+        
+        Args:
+            inter_distance (float): Controls Inter-class Variance (distance between centroids).
+            intra_spread (float): Controls Intra-class Variance (standard deviation within classes).
+            n_samples (int): Total number of data points.
+            n_features (int): Dimensionality of the data.
+        """
+        if label in self.datasets_dict:
+            print(f"Warning: Dataset '{label}' already exists. Overwriting...")
+            
+        # Define the centroids based on the inter_distance
+        # We place Class 0 at (-distance/2, -distance/2) 
+        # and Class 1 at (distance/2, distance/2)
+        offset = inter_distance / 2.0
+        centers = [
+            np.full(n_features, -offset), 
+            np.full(n_features, offset)
+        ]
+        
+        # 2. Generate the data using make_blobs
+        # cluster_std maps perfectly to your Intra-class Variance
+        X, y = datasets.make_blobs(
+            n_samples=n_samples,
+            n_features=2,
+            centers=centers,
+            cluster_std=intra_spread, # This isolates the intra-variance
+            random_state=random_state
+        )
+        
+        self.datasets_dict[label] = (X, y)
+        
+        return X, y
+    
     def initialise_datasets(self, mode, num_dims, sweep_values, 
-                           n_classes=2, n_samples=500, random_state=42):
+                            n_classes=2, n_samples=300, random_state=42):
         """
         Pre-generate multiple datasets for an experiment mode.
         
         Args:
-            mode: Experiment mode ('feature_complexity', 'margin', 'clusters', 'noise')
+            mode: Experiment mode (e.g., 'feature_complexity', 'inter_distance', etc.)
             num_dims: Number of features
             sweep_values: List of parameter values to test
             n_classes: Number of classes (default: 2 for binary classification)
@@ -340,12 +376,18 @@ class SyntheticDataManager():
         Returns:
             dict: {label: (X, y)} mapping of generated datasets
         """
-        # Map mode to parameter name
+        
+        # Map mode to a tuple: (parameter_name, generation_target)
         mode_config = {
-            'feature_complexity': 'n_informative',
-            'margin': 'class_sep',
-            'clusters': 'n_clusters_per_class',
-            'noise': 'flip_y'
+            # Standard sklearn make_classification modes
+            'feature_complexity': ('n_informative', 'classification'),
+            'margin': ('class_sep', 'classification'),
+            'clusters': ('n_clusters_per_class', 'classification'),
+            'noise': ('flip_y', 'classification'),
+            
+            # Custom variance/entanglement modes
+            'inter_distance': ('inter_distance', 'variance'),
+            'intra_spread': ('intra_spread', 'variance')
         }
         
         if mode not in mode_config:
@@ -354,23 +396,32 @@ class SyntheticDataManager():
                 f"Available modes: {list(mode_config.keys())}"
             )
         
-        param_name = mode_config[mode]
+        param_name, target_generator = mode_config[mode]
                 
         # Generate dataset for each experiment value
         for value in sweep_values:
             label = f"{mode}_{value}"
             
-            # Build parameter dict with varying parameter
+            # Build parameter dict with the shared baseline parameters
             params = {
                 'label': label,
-                'num_dims': num_dims,
+                # 'num_dims': num_dims,
                 'n_samples': n_samples,
-                'n_classes': n_classes,
                 'random_state': random_state,
                 param_name: value  # This is the varying parameter
             }
             
-            self.create_dataset(**params)
+            # Route execution to the correct generation function
+            if target_generator == 'classification':
+                params['num_dims'] = num_dims
+                params['n_classes'] = n_classes  # Add class count for sklearn
+                self.create_dataset(**params)
+                
+            elif target_generator == 'variance':
+                # Our custom variance generator is inherently built for binary 
+                # classification (2 centroids), so n_classes is implicitly handled.
+                params['n_features'] = num_dims
+                self.create_variance_dataset(**params)
         
         return self.datasets_dict
     
