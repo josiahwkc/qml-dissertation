@@ -365,7 +365,7 @@ class ExperimentRunner():
         plt.grid(True)
         plt.tight_layout()
         
-        plt.savefig(os.path.join(save_dir, 'accuracy.png'), dpi=300)
+        plt.savefig(os.path.join(save_dir, 'accuracy.pdf'), format='pdf', dpi=300)
         plt.show()
         
         # 2. F1 Score Plot
@@ -384,7 +384,7 @@ class ExperimentRunner():
         plt.grid(True)
         plt.tight_layout()
         
-        plt.savefig(os.path.join(save_dir, 'f1_score.png'), dpi=300)
+        plt.savefig(os.path.join(save_dir, 'f1_score.pdf'), format='pdf', dpi=300)
         plt.show()
         
         # 3. Training Time Plot
@@ -402,7 +402,7 @@ class ExperimentRunner():
         plt.grid(True)
         plt.tight_layout()
         
-        plt.savefig(os.path.join(save_dir, 'training_time.png'), dpi=300)
+        plt.savefig(os.path.join(save_dir, 'training_time.pdf'), format='pdf', dpi=300)
         plt.show()
         
     def _tune_hyperparameters(self, mode):
