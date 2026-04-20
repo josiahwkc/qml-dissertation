@@ -179,8 +179,6 @@ class ExperimentRunner():
         self.num_trials = ExperimentConfig.NUM_TRIALS
         self.fixed_size = ExperimentConfig.FIXED_SIZE
         self.config = None
-        
-        # self.classical_clf = SVC(kernel='rbf')
         self.data_manager = None
         self.clear_results()
         
@@ -193,7 +191,6 @@ class ExperimentRunner():
             filename: CSV filename (required for CSV modes)
             target_col: Target column (required for CSV modes)
         """
-        self.config = ExperimentConfig.get(mode)
         
         # Validation
         if self.config['requires_file'] and (filename is None or target_col is None):
@@ -283,7 +280,7 @@ class ExperimentRunner():
         
         return score, f1, (end_time - start_time)
     
-    def run_experiment(self, mode):
+    def run_experiment(self, mode, filename=None, target_col=None):
         """
         Run complete experiment pipeline.
         
@@ -293,7 +290,9 @@ class ExperimentRunner():
         # Resets and clears stored results
         self.clear_results()
         
-        sweep_values = self.config['sweep_values']
+        self.config = ExperimentConfig.get(mode)
+        self.initialise_datasets(mode, filename, target_col)
+        
         
         # Phase 1: Tune hyperparameters  
         c_params, q_params = self._tune_hyperparameters(mode)
@@ -315,6 +314,7 @@ class ExperimentRunner():
         
         
         # Phase 3: Run trials for each sweep value
+        sweep_values = self.config['sweep_values']
         print("\n" + "="*80)
         print(" PHASE 3: RUNNING SWEEPS")
         print("="*80)
