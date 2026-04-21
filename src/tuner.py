@@ -4,7 +4,9 @@ SVM Hyperparameter Tuner
 Author: Josiah Chan (K23091949)
 
 Description:
-  ...
+    Hyperparameter tuning utilities for both Classical and Quantum Support
+    Vector Machines. Implements grid search with hold-out validation to find
+    optimal model configurations for binary classification tasks.
 """
 
 import time
@@ -134,9 +136,10 @@ class QuantumSVMTuner:
                     reps=reps, 
                     entanglement=entanglement
                 )
+                # Use idealised kernel
                 kernel = FidelityStatevectorKernel(feature_map=feature_map)
                 
-                # Precompute kernel matrices (expensive!)
+                # Precompute kernel matrices
                 try:
                     matrix_train = kernel.evaluate(x_vec=X_train)
                     matrix_val = kernel.evaluate(x_vec=X_val, y_vec=X_train)

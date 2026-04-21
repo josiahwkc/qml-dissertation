@@ -9,7 +9,7 @@ Description:
   synthetic datasets with configurable properties.
   
 Key Classes:
-  - DataManager: Loads MNIST digits with PCA dimensionality reduction
+  - CSVDataManager: Loads MNIST digits with PCA dimensionality reduction
   - AdhocDataManager: Generates synthetic data using Qiskit's ad_hoc_data
   
 Key Features:
@@ -37,12 +37,15 @@ class TrainingSampler():
     def create_class_imbalance(X_pool, y_pool, train_size, seed, imbalance_ratio=0.5):
         rng = np.random.default_rng(seed)
         
+        # Separate dataset by class
         X_pool_class0 = X_pool[y_pool == 0]
         X_pool_class1 = X_pool[y_pool == 1]
         
+        # calculate number of samples needed
         n_class0 = int(train_size * imbalance_ratio)
         n_class1 = train_size - n_class0
         
+        # sample without replacement
         idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
         idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
         
@@ -58,7 +61,7 @@ class TrainingSampler():
 
 
 class QuantumBenchmarkDataManager():
-    """Generates synthetic data using Qiskit's ad_hoc_data"""
+    """Generates and manages Qiskit's synthetic ad_hoc_data dataset"""
     
     def __init__(self):
         self.X_pool = None
@@ -68,13 +71,13 @@ class QuantumBenchmarkDataManager():
     
     def create_dataset(self, num_dims=2, gap=0.3, pool_size=800, test_size=200):
         """
-        Generate synthetic data using ad_hoc_data.
+        Generates the ad_hoc_data mathematically designed for the ZZFeatureMap.
         
         Args:
-            num_dims: Number of features
-            gap: Class separation
-            pool_size: Size of training pool for sampling
-            test_size: Size of fixed test set
+            num_dims (int): Dimensionality of the data (typically 2 or 3).
+            gap (float): Separation gap between classes.
+            pool_size (int): Size of the training pool for later sampling.
+            test_size (int): Size of the fixed test set.
         """
         per_class_train = pool_size // 2
         per_class_test = test_size // 2
@@ -106,7 +109,7 @@ class QuantumBenchmarkDataManager():
 
 
 class CSVDataManager():
-    """Manages arbitrary CSV datasets with automatic preprocessing"""
+    """Manages raw CSV datasets, handling encoding, missing values, and PCA dimensionality reduction."""
     def __init__(self):
         self.filename = None
         self.X = None
@@ -115,14 +118,16 @@ class CSVDataManager():
     def load_dataset(self, filename, target_col, num_dims=5, n_class=2, 
                  categorical_cols=None, drop_cols=None, max_samples=1000):
         """
+        Loads and cleans a CSV file from the local 'datasets' directory.
+        
         Args:
-            filename: CSV filename in the datasets/ folder
-            target_col: Name of the target column to predict
-            num_dims: Number of PCA components for dimensionality reduction
-            n_class: Number of classes to keep (None = keep all)
-            categorical_cols: List of categorical column names to encode
-            drop_cols: List of columns to drop before processing
-            max_samples: Maximum total samples to use (for large datasets like MNIST)
+            filename (str): Name of the CSV file.
+            target_col (str): The column to be used as the prediction label.
+            num_dims (int): Number of components to reduce the data to via PCA.
+            n_class (int): Number of classes to retain (None = keep all).
+            categorical_cols (list): Specific columns to label encode.
+            drop_cols (list): Columns to safely ignore/remove before processing.
+            max_samples (int): Ceiling limit to prevent memory overflow on large datasets.
         """
         self.filename = filename
         self.num_dims = num_dims
@@ -163,15 +168,14 @@ class CSVDataManager():
                     le = LabelEncoder()
                     X_df[col] = le.fit_transform(X_df[col].astype(str))
         
-        # Handle missing values
+        # Handle missing values by filling with column mean
         if X_df.isnull().any().any():
             print("Warning: Missing values detected. Filling with column means.")
             X_df = X_df.fillna(X_df.mean())
         
-        # Convert to numpy
         X_raw = X_df.values
         
-        # Encode target labels
+        # Encode target labels (e.g., 'Malignant'/'Benign' -> 1/0)
         le_target = LabelEncoder()
         y_encoded = le_target.fit_transform(y_raw)
         self.target_classes = le_target.classes_
@@ -214,6 +218,7 @@ class CSVDataManager():
             self.num_dims = self.X.shape[1]
     
     def preprocess_data(self, X_train, X_val, X_test):
+        """Applies Standard Scaling, PCA, and MinMax scaling (crucial for quantum angles)."""
         preprocessing_pipeline = Pipeline([
             ('std_scaler', StandardScaler()),
             ('pca', PCA(n_components=self.num_dims)),
@@ -228,9 +233,7 @@ class CSVDataManager():
         return X_train_processed, X_val_processed, X_test_processed
     
     def get_kfold_splits(self, seed, k_folds=5):
-        """
-        Generator that yields k mutually exclusive splits of the data.
-        """
+        """Generator yielding K mutually exclusive data folds for Cross-Validation."""
         # Split into pool and test
         X_pool, X_test, y_pool, y_test = train_test_split(
             self.X, self.y, test_size=0.2, random_state=seed, stratify=self.y
@@ -270,31 +273,15 @@ class CSVDataManager():
     
 
 class SyntheticDataManager():
-    """Generates synthetic data using scikit-learn's make_classification"""
+    """Generates complex synthetic datasets to test specific geometric hypotheses."""
     def __init__(self):
-        # Dictionary of tuples (X, y)
+        # Stores generated datasets keyed by their unique experiment label
         self.datasets_dict = {}
         
     def create_dataset(self, label, num_dims, n_samples, n_informative=4, 
                       n_classes=2, n_clusters_per_class=1, flip_y=0.01, 
                       class_sep=1.0, random_state=42):
-        """
-        Create and store a single synthetic dataset.
-        
-        Args:
-            label: Unique identifier for this dataset
-            num_dims: Number of features (dimensionality)
-            n_samples: Total number of samples to generate
-            n_informative: Number of informative features
-            n_classes: Number of classes
-            n_clusters_per_class: Number of clusters per class
-            flip_y: Fraction of samples whose class is randomly flipped (noise)
-            class_sep: Class separation factor (larger = easier classification)
-            random_state: Random seed for reproducibility
-        
-        Returns:
-            tuple: (X, y) arrays that were generated
-        """
+        """Generates datasets using sklearn's make_classification."""
         # Validation
         if n_informative > num_dims:
             raise ValueError(
@@ -338,16 +325,15 @@ class SyntheticDataManager():
             print(f"Warning: Dataset '{label}' already exists. Overwriting...")
             
         # Define the centroids based on the inter_distance
-        # We place Class 0 at (-distance/2, -distance/2) 
-        # and Class 1 at (distance/2, distance/2)
+        # Class 0 at (-distance/2, -distance/2) 
+        # Class 1 at (distance/2, distance/2)
         offset = centroids_distance / 2.0
         centers = [
             np.full(n_features, -offset), 
             np.full(n_features, offset)
         ]
         
-        # 2. Generate the data using make_blobs
-        # cluster_std maps perfectly to your Intra-class Variance
+        # Generate the data using make_blobs
         X, y = datasets.make_blobs(
             n_samples=n_samples,
             n_features=n_features,
@@ -363,29 +349,15 @@ class SyntheticDataManager():
     def initialise_datasets(self, mode, num_dims, sweep_values, 
                             n_classes=2, n_samples=300, random_state=42):
         """
-        Pre-generate multiple datasets for an experiment mode.
-        
-        Args:
-            mode: Experiment mode (e.g., 'feature_complexity', 'inter_distance', etc.)
-            num_dims: Number of features
-            sweep_values: List of parameter values to test
-            n_classes: Number of classes (default: 2 for binary classification)
-            n_samples: Number of samples per dataset
-            random_state: Random seed
-        
-        Returns:
-            dict: {label: (X, y)} mapping of generated datasets
+        Master orchestration function. Pre-generates all datasets needed for an entire sweep.
         """
         
-        # Map mode to a tuple: (parameter_name, generation_target)
+        # Map the UI experiment mode to the correct sklearn parameter and function
         mode_config = {
-            # Standard sklearn make_classification modes
             'feature_complexity': ('n_informative', 'classification'),
             'margin': ('class_sep', 'classification'),
             'clusters': ('n_clusters_per_class', 'classification'),
             'noise': ('flip_y', 'classification'),
-            
-            # Custom variance/entanglement modes
             'centroids_distance': ('centroids_distance', 'variance'),
             'cluster_spread': ('cluster_spread', 'variance')
         }
@@ -405,7 +377,6 @@ class SyntheticDataManager():
             # Build parameter dict with the shared baseline parameters
             params = {
                 'label': label,
-                # 'num_dims': num_dims,
                 'n_samples': n_samples,
                 'random_state': random_state,
                 param_name: value  # This is the varying parameter
@@ -424,6 +395,8 @@ class SyntheticDataManager():
         return self.datasets_dict
     
     def preprocess_data(self, X_train, X_val, X_test):
+        """Applies Standard and MinMax scaling (PCA omitted for purely synthetic geometric data)."""
+        
         preprocessing_pipeline = Pipeline([
             ('std_scaler', StandardScaler()), 
             ('minmax_scaler', MinMaxScaler(feature_range=(0, 1)))
@@ -436,9 +409,8 @@ class SyntheticDataManager():
         return X_train_processed, X_val_processed, X_test_processed
     
     def get_kfold_splits(self, seed, label, k_folds=5):
-        """
-        Generator that yields k mutually exclusive splits of the data.
-        """
+        """Generator yielding K mutually exclusive folds for a specific synthetic dataset."""
+        
         X, y = self.datasets_dict[label]
         
         # Split into pool and test

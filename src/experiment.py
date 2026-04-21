@@ -10,10 +10,7 @@ Description:
   Key Features:
   - Data Diet Analysis: Testing performance across varying training set sizes.
   - Dimensionality Reduction: PCA pipeline to map 64-pixel images to N-qubits.
-
-Attribution:
-  - Base QSVC logic adapted from IBM Qiskit Summer School 2021 (Lab 3).
-  - Original URL: https://github.com/Qiskit/platypus/blob/main/notebooks/summer-school/2021/resources/lab-notebooks/lab-3.ipynb
+  - Rigorous Statistics: Nadeau-Bengio corrected t-tests for overlapping train sets.
 """
 
 import os
@@ -28,8 +25,6 @@ from sklearn import metrics
 
 from data_manager import CSVDataManager, QuantumBenchmarkDataManager, SyntheticDataManager, TrainingSampler
 from tuner import ClassicalSVMTuner, QuantumSVMTuner
-
-# Quantum Imports
 from feature_map_factory import FeatureMapFactory
 
 class ExperimentConfig:
@@ -79,7 +74,7 @@ class ExperimentConfig:
             'value_name': 'Informative Features',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [1], #2, 3, 4, 5],
+            'sweep_values': [1, 2, 3, 4, 5],
             'sweep_parameter': 'n_informative',
             'num_dims': NUM_DIMS,
             'description': 'Vary number of informative features in synthetic data'
@@ -90,7 +85,7 @@ class ExperimentConfig:
             'value_name': 'Class Separation',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [0.1], #0.5, 1.0, 1.5, 2.0],
+            'sweep_values': [0.1, 0.5, 1.0, 1.5, 2.0],
             'sweep_parameter': 'class_sep',
             'num_dims': NUM_DIMS,
             'description': 'Vary class separation margin in synthetic data'
@@ -101,7 +96,7 @@ class ExperimentConfig:
             'value_name': 'Clusters/Class',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [1], #2, 3, 4],
+            'sweep_values': [1, 2, 3, 4],
             'sweep_parameter': 'n_clusters_per_class',
             'num_dims': NUM_DIMS,
             'description': 'Vary decision boundary complexity via clusters'
@@ -112,7 +107,7 @@ class ExperimentConfig:
             'value_name': 'Noise Fraction',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [0.0], #0.05, 0.10, 0.15, 0.20],
+            'sweep_values': [0.0, 0.05, 0.10, 0.15, 0.20],
             'sweep_parameter': 'flip_y',
             'num_dims': NUM_DIMS,
             'description': 'Vary label noise in synthetic data'
@@ -123,7 +118,7 @@ class ExperimentConfig:
             'value_name': 'Centroids Distance',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [1.4], #1.2, 1.0, 0.8, 0.6],  # Decreasing distance = higher entanglement
+            'sweep_values': [1.4, 1.2, 1.0, 0.8, 0.6],  # Decreasing distance = higher entanglement
             'sweep_parameter': 'inter_distance',
             'num_dims': NUM_DIMS,
             'description': 'Vary the spatial distance between class centroids'
@@ -134,7 +129,7 @@ class ExperimentConfig:
             'value_name': 'Cluster Spread',
             'data_source': DATA_SOURCE_SKLEARN, 
             'requires_file': False,
-            'sweep_values': [0.5], #1.0, 1.5, 2.0, 3.0],  # Increasing spread = higher entanglement
+            'sweep_values': [0.5, 1.0, 1.5, 2.0, 3.0],  # Increasing spread = higher entanglement
             'sweep_parameter': 'cluster_std',
             'num_dims': NUM_DIMS,
             'description': 'Vary the spatial scatter of points within each class'
@@ -158,18 +153,7 @@ class ExperimentConfig:
     
     @classmethod
     def get(cls, mode):
-        """
-        Get configuration for a mode.
-        
-        Args:
-            mode: Experiment mode name
-            
-        Returns:
-            dict: Configuration dictionary
-            
-        Raises:
-            ValueError: If mode is invalid
-        """
+        """Get configuration for a mode."""
         if mode not in cls.MODES:
             available = ', '.join(cls.MODES.keys())
             raise ValueError(
@@ -179,6 +163,12 @@ class ExperimentConfig:
 
 
 class ExperimentRunner():
+    """
+    Master orchestrator for the benchmarking pipeline. 
+    Handles data preparation, hyperparameter tuning, parallel execution of 
+    quantum and classical models, statistical testing, and plotting.
+    """
+    
     def __init__(self, quantum_provider):
         self.qp = quantum_provider
         self.num_dims = ExperimentConfig.NUM_DIMS
@@ -189,16 +179,9 @@ class ExperimentRunner():
         self.clear_results()
         
     def initialise_datasets(self, mode, filename=None, target_col=None):
-        """
-        Initialize datasets based on mode's data source.
+        """Routes dataset generation to the appropriate manager based on the config."""
         
-        Args:
-            mode: Experiment mode
-            filename: CSV filename (required for CSV modes)
-            target_col: Target column (required for CSV modes)
-        """
-        
-        # Validation
+        # Validation check for CSV
         if self.config['requires_file'] and (filename is None or target_col is None):
             raise ValueError(
                 f"Mode '{mode}' requires filename and target_col parameters"
@@ -207,6 +190,7 @@ class ExperimentRunner():
         data_source = self.config['data_source']
         sweep_values = self.config['sweep_values']
         
+        # Route to specific Data Manager
         if data_source == ExperimentConfig.DATA_SOURCE_CSV:
             print(f"Loading CSV dataset: {filename}")
             self.data_manager = CSVDataManager()
@@ -239,6 +223,8 @@ class ExperimentRunner():
             raise ValueError(f"Unknown data source: {data_source}")
     
     def clear_results(self):
+        """Resets the results dictionary before starting a new experiment."""
+        
         self.results = {
             'x_values': [],
             'q_acc': [], 'q_acc_std': [], 'q_f1': [], 'q_f1_std': [], 'q_time': [],
@@ -249,7 +235,7 @@ class ExperimentRunner():
         }
        
     def run_classical(self, X_train, X_test, y_train, y_test, kernel, params):
-        """Runs Classical SVM (RBF Kernel) with locked parameters"""            
+        """Evaluates the Classical SVM using the Radial Basis Function (RBF) kernel."""            
         start_time = time.time()
         kernel.fit(X_train, y_train)
         end_time = time.time()
@@ -262,18 +248,22 @@ class ExperimentRunner():
         return score, f1, (end_time - start_time)
     
     def run_quantum(self, X_train, X_test, y_train, y_test, kernel, params):
-        """Runs Quantum SVM with locked parameters"""        
+        """
+        Evaluates the Quantum SVM. 
+        Note: The actual quantum execution happens during `kernel.evaluate()`.
+        """        
         start_time = time.time()
-        print("Quantum start")
+        
         try:
+            # Run circuits
             matrix_train = kernel.evaluate(x_vec=X_train)
-            print("Train matrix done")
+            # Evaluate test kernel overlaps
             matrix_test = kernel.evaluate(x_vec=X_test, y_vec=X_train)
-            print("Test matrix done")
         except ValueError as e:
             print(f"\nCRITICAL ERROR: {e}")
             exit()
-            
+        
+        # Pass precomputed matrices to classical sklearn optimiser
         qsvm = SVC(kernel='precomputed', C=params['C'])
         qsvm.fit(matrix_train, y_train)
         
@@ -288,9 +278,7 @@ class ExperimentRunner():
     
     def run_experiment(self, mode, filename=None, target_col=None):
         """
-        Run complete experiment pipeline.
-        
-        Clean orchestration method that delegates to focused helper methods.
+        Master loop executing the 4 phases of the experiment pipeline.
         """
         
         # Resets and clears stored results
@@ -338,7 +326,7 @@ class ExperimentRunner():
         print(f"Data saved to {save_dir}/summary_metrics.csv")
     
     def plot_results(self):
-        """Generate, save, and display individual comparison plots"""
+        """Generates, saves, and displays Matplotlib visualizations for the sweeps."""
         
         save_dir, dataset_name = self._get_output_meta()
         
@@ -443,12 +431,7 @@ class ExperimentRunner():
         plt.show()
         
     def _tune_hyperparameters(self, mode):
-        """
-        Tune hyperparameters on baseline dataset.
-        
-        Returns:
-            tuple: (classical_params, quantum_params)
-        """
+        """Finds optimal C and Gamma (Classical) and Reps/Entanglement (Quantum)."""
         
         # Get baseline dataset
         X_train, X_val, y_train, y_val = self._get_baseline_split(mode)
@@ -477,12 +460,13 @@ class ExperimentRunner():
         return c_params, q_params
     
     def _get_baseline_split(self, mode):
-        """Get train/val split from baseline dataset"""
+        """Extracts a representative baseline dataset for tuning."""
+        
         sweep_values = self.config['sweep_values']
         data_source = self.config['data_source']
         
         if data_source == ExperimentConfig.DATA_SOURCE_SKLEARN:
-            # Use middle value as baseline
+            # Use median value as baseline
             baseline_value = sweep_values[len(sweep_values) // 2]
             label = f"{mode}_{baseline_value}"
             X_train, X_val, _, y_train, y_val, _ = self.data_manager.get_data_split(seed=42, label=label)
@@ -493,7 +477,7 @@ class ExperimentRunner():
         return X_train, X_val, y_train, y_val
     
     def _build_quantum_kernel(self, q_params):
-        """Build quantum kernel with tuned parameters"""
+        """Constructs the Qiskit FidelityQuantumKernel with the tuned FeatureMap."""
         
         optimized_fm = FeatureMapFactory.build_zz_map(
             num_dims=self.num_dims,
@@ -504,16 +488,17 @@ class ExperimentRunner():
         
         kernel = self.qp.get_kernel(optimized_fm)
         
-        print(f"  Kernel built: reps={q_params['reps']}, "
-        f"entanglement={q_params['entanglement']}")
-        
+        print(f"  Quantum Kernel built: reps={q_params['reps']}, entanglement={q_params['entanglement']}")
         return kernel
 
     def _build_classical_kernel(self, c_params):
+        """Constructs the Scikit-Learn RBF Kernel."""
+        
+        print(f"  RBF Kernel built: c={c_params['C']}, gamma={c_params['gamma']}")
         return SVC(kernel='rbf', C=c_params['C'], gamma=c_params['gamma'])
 
     def _run_trials_for_value(self, mode, value, c_params, q_params, c_kernel, q_kernel):
-        """Run all trials for a single sweep value"""
+        """Manages the iteration loop for a specific independent variable value."""
         print(f"\n{'-'*80}")
         print(f"RUNNING: {self.config['value_name']} = {value}")
         print(f"{'-'*80}")
@@ -661,8 +646,9 @@ class ExperimentRunner():
     def _nadeau_bengio_corrected_ttest(self, q_scores, c_scores, n_train, n_test):
         """
         Computes the Nadeau-Bengio corrected paired t-test for repeated 
-        train/test splits. Corrects for the variance underestimation caused 
-        by overlapping training sets.
+        train/test splits. Standard t-tests underestimate variance when training
+        sets overlap (as in Cross-Validation or Monte Carlo), leading to false positives.
+        This correction adjusts the variance based on the train/test ratio.
         
         Ref: Nadeau, C., and Bengio, Y. (2003). Inference for the Generalization Error.
         """
