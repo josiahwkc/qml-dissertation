@@ -30,15 +30,13 @@ from data_manager import CSVDataManager, QuantumBenchmarkDataManager, SyntheticD
 from tuner import ClassicalSVMTuner, QuantumSVMTuner
 
 # Quantum Imports
-from qiskit.circuit.library import ZZFeatureMap
-from qiskit_machine_learning.kernels import FidelityQuantumKernel
 from feature_map_factory import FeatureMapFactory
 
 class ExperimentConfig:
     """Configuration for experiment modes with explicit data source types"""
     
     NUM_DIMS = 5          # Number of PCA dimensions (and Qubits)
-    NUM_TRIALS = 10 #30   # Number of random seeds to average over
+    NUM_TRIALS = 10       # Number of random seeds to average over
     N_CLASS = 2           # Binary classification
     FIXED_SIZE = 100      # Default training size for non-'size' experiments
     
@@ -58,6 +56,7 @@ class ExperimentConfig:
             'data_source': DATA_SOURCE_CSV,
             'requires_file': True,
             'sweep_values': [50, 100, 150, 200, 250, 300],
+            'num_dims': NUM_DIMS,
             'description': 'Vary training set size on real data'
         },
         'imbalance': {
@@ -67,6 +66,7 @@ class ExperimentConfig:
             'data_source': DATA_SOURCE_CSV,
             'requires_file': True,
             'sweep_values': [0.5, 0.6, 0.7, 0.8, 0.9],
+            'num_dims': NUM_DIMS,
             'description': 'Vary class imbalance ratio on real data'
         },
         
@@ -79,8 +79,9 @@ class ExperimentConfig:
             'value_name': 'Informative Features',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [1, 2, 3, 4, 5],
+            'sweep_values': [1], #2, 3, 4, 5],
             'sweep_parameter': 'n_informative',
+            'num_dims': NUM_DIMS,
             'description': 'Vary number of informative features in synthetic data'
         },
         'margin': {
@@ -89,8 +90,9 @@ class ExperimentConfig:
             'value_name': 'Class Separation',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [0.1, 0.5, 1.0, 1.5, 2.0],
+            'sweep_values': [0.1], #0.5, 1.0, 1.5, 2.0],
             'sweep_parameter': 'class_sep',
+            'num_dims': NUM_DIMS,
             'description': 'Vary class separation margin in synthetic data'
         },
         'clusters': {
@@ -99,8 +101,9 @@ class ExperimentConfig:
             'value_name': 'Clusters/Class',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [1, 2, 3, 4],
+            'sweep_values': [1], #2, 3, 4],
             'sweep_parameter': 'n_clusters_per_class',
+            'num_dims': NUM_DIMS,
             'description': 'Vary decision boundary complexity via clusters'
         },
         'noise': {
@@ -109,28 +112,31 @@ class ExperimentConfig:
             'value_name': 'Noise Fraction',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [0.0, 0.05, 0.10, 0.15, 0.20],
+            'sweep_values': [0.0], #0.05, 0.10, 0.15, 0.20],
             'sweep_parameter': 'flip_y',
+            'num_dims': NUM_DIMS,
             'description': 'Vary label noise in synthetic data'
         },
-        'inter_distance': {
-            'x_label': 'Inter-class Distance',
-            'title_suffix': 'vs Inter-class Distance',
-            'value_name': 'Centroid Distance',
+        'centroids_distance': {
+            'x_label': 'Centroids Distance (Inter-variance)',
+            'title_suffix': 'vs Centroids Distance',
+            'value_name': 'Centroids Distance',
             'data_source': DATA_SOURCE_SKLEARN,
             'requires_file': False,
-            'sweep_values': [1.4, 1.2, 1.0, 0.8, 0.6],  # Decreasing distance = higher entanglement
+            'sweep_values': [1.4], #1.2, 1.0, 0.8, 0.6],  # Decreasing distance = higher entanglement
             'sweep_parameter': 'inter_distance',
+            'num_dims': NUM_DIMS,
             'description': 'Vary the spatial distance between class centroids'
         },
-        'intra_spread': {
-            'x_label': 'Intra-class Variance (Std Dev)',
-            'title_suffix': 'vs Intra-class Variance',
+        'cluster_spread': {
+            'x_label': 'Cluster Spread (Intra-variance)',
+            'title_suffix': 'vs Cluster Spread',
             'value_name': 'Cluster Spread',
             'data_source': DATA_SOURCE_SKLEARN, 
             'requires_file': False,
-            'sweep_values': [0.5, 1.0, 1.5, 2.0, 3.0],  # Increasing spread = higher entanglement
+            'sweep_values': [0.5], #1.0, 1.5, 2.0, 3.0],  # Increasing spread = higher entanglement
             'sweep_parameter': 'cluster_std',
+            'num_dims': NUM_DIMS,
             'description': 'Vary the spatial scatter of points within each class'
         },
         
@@ -145,8 +151,8 @@ class ExperimentConfig:
             'requires_file': False,
             'sweep_values': [50, 100, 150, 200, 250, 300],
             'sweep_parameter': 'gap',
-            'description': 'Qiskit ad_hoc_data optimized for ZZFeatureMap',
-            'fixed_dims': 2,  # ad_hoc_data only allows 2 or 3 dimensions
+            'num_dims': 2,  # ad_hoc_data only allows 2 or 3 dimensions
+            'description': 'Qiskit ad_hoc_data optimized for ZZFeatureMap'
         },
     }
     
@@ -222,7 +228,7 @@ class ExperimentRunner():
         elif data_source == ExperimentConfig.DATA_SOURCE_QISKIT:
             print(f"Generating Qiskit ad_hoc datasets for '{mode}' mode...")
             
-            fixed_dims = self.config['fixed_dims']
+            fixed_dims = self.config['num_dims']
             print(f"Note: ad_hoc_data works best with {fixed_dims} dimensions.")
             print(f"Generating dataset with {fixed_dims} dimensions.")
                 
@@ -292,7 +298,7 @@ class ExperimentRunner():
         
         self.config = ExperimentConfig.get(mode)
         self.initialise_datasets(mode, filename, target_col)
-        
+        self.num_dims = self.config['num_dims']
         
         # Phase 1: Tune hyperparameters  
         c_params, q_params = self._tune_hyperparameters(mode)
@@ -304,14 +310,7 @@ class ExperimentRunner():
             gamma=c_params['gamma']
         )
         
-        # q_kernel = self._build_quantum_kernel(q_params)
-        feature_map = ZZFeatureMap(
-            feature_dimension=self.num_dims,
-            reps=q_params['reps'],
-            entanglement=q_params['entanglement'],
-        )
-        q_kernel = FidelityQuantumKernel(feature_map=feature_map)
-        
+        q_kernel = self._build_quantum_kernel(q_params)
         
         # Phase 3: Run trials for each sweep value
         sweep_values = self.config['sweep_values']
@@ -616,8 +615,8 @@ class ExperimentRunner():
     def _calculate_statistics(self, c_data, q_data):
         """Calculate all statistics for comparison"""
         # Get last trial's train/test sizes
-        n_train = len(c_data['acc'])  # Placeholder - get from actual data
-        n_test = len(c_data['acc'])   # Placeholder - get from actual data
+        n_train = len(c_data['acc']) 
+        n_test = len(c_data['acc'])  
         
         stats = {
             # Classical
@@ -710,7 +709,6 @@ class ExperimentRunner():
         # Print to console for real-time monitoring
         print(full_report)
         
-        # Unpack the tuple to safely get JUST the directory path
         save_dir, _ = self._get_output_meta()
         log_file = os.path.join(save_dir, 'detailed_report.txt')
         
