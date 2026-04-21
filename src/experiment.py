@@ -300,15 +300,17 @@ class ExperimentRunner():
         self.initialise_datasets(mode, filename, target_col)
         self.num_dims = self.config['num_dims']
         
-        # Phase 1: Tune hyperparameters  
+        # Phase 1: Tune hyperparameters
+        print("\n" + "="*80)
+        print(" PHASE 1: HYPERPARAMETER OPTIMIZATION")
+        print("="*80)  
         c_params, q_params = self._tune_hyperparameters(mode)
 
         # Phase 2: Build kernels once
-        c_kernel = SVC(
-            kernel='rbf',
-            C=c_params['C'],
-            gamma=c_params['gamma']
-        )
+        print("\n" + "="*80)
+        print(" PHASE 2: BUILDING KERNELS")
+        print("="*80)
+        c_kernel = self._build_classical_kernel(c_params)
         
         q_kernel = self._build_quantum_kernel(q_params)
         
@@ -447,9 +449,6 @@ class ExperimentRunner():
         Returns:
             tuple: (classical_params, quantum_params)
         """
-        print("\n" + "="*80)
-        print(" PHASE 1: HYPERPARAMETER OPTIMIZATION")
-        print("="*80)
         
         # Get baseline dataset
         X_train, X_val, y_train, y_val = self._get_baseline_split(mode)
@@ -495,9 +494,6 @@ class ExperimentRunner():
     
     def _build_quantum_kernel(self, q_params):
         """Build quantum kernel with tuned parameters"""
-        print("\n" + "="*80)
-        print(" PHASE 2: BUILDING QUANTUM KERNEL")
-        print("="*80)
         
         optimized_fm = FeatureMapFactory.build_zz_map(
             num_dims=self.num_dims,
@@ -512,6 +508,9 @@ class ExperimentRunner():
         f"entanglement={q_params['entanglement']}")
         
         return kernel
+
+    def _build_classical_kernel(self, c_params):
+        return SVC(kernel='rbf', C=c_params['C'], gamma=c_params['gamma'])
 
     def _run_trials_for_value(self, mode, value, c_params, q_params, c_kernel, q_kernel):
         """Run all trials for a single sweep value"""
