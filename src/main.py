@@ -29,8 +29,12 @@ SYNTHETIC_MODES = [
     'margin', 
     'clusters', 
     'noise', 
-    'inter_distance', 
-    'intra_spread',
+    'centroids_distance', 
+    'cluster_spread',
+    
+]
+
+QUANTUM_MODES = [
     'quantum_benchmark'
 ]
 
@@ -51,8 +55,8 @@ def get_user_choice(options):
             print("Error: Invalid input. Please type a number.")
 
 def main():
-    print("Would you like to experiment on real-world CSV data? Or synthetically generated data?") 
-    data_type = get_user_choice(["CSV Data", "Synthetic Data"])
+    print("Which type of data would you like to experiment on?") 
+    data_type = get_user_choice(["CSV Data", "Synthetic Data", "Quantum Data"])
     
     filename = None
     target_col = None
@@ -68,9 +72,11 @@ def main():
         print("\nWhich variable do you want to experiment on?")
         experiment_mode = get_user_choice(CSV_MODES)
         
-    else:
+    elif data_type == "Synthetic Data":
         print("\nWhich variable do you want to experiment on?")
         experiment_mode = get_user_choice(SYNTHETIC_MODES)
+    else:
+        experiment_mode = "quantum_benchmark"
         
     provider = QuantumProvider()
     runner = ExperimentRunner(quantum_provider=provider)
