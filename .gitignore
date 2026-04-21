@@ -50,3 +50,4 @@ Thumbs.db
 .coverage
 detailed_report.txt
 visualisations.py
+tests/
