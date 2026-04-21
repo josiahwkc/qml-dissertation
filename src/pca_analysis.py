@@ -91,10 +91,7 @@ def plot_pca_variance(csv_filename, target_col, max_samples=1000, limit=16, outp
     file_name = f"pca_top_{plot_limit}_{base_name}.png"
     save_path = os.path.join(output_folder, file_name)
     
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(f"{save_path}.pdf", format='pdf', dpi=300, bbox_inches='tight')
     plt.close()
     
     print(f"Graph successfully saved to: {save_path}")
-
-# Run it
-plot_pca_variance("mnist_train.csv", "label", limit=16)
