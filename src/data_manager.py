@@ -85,7 +85,7 @@ class QuantumBenchmarkDataManager():
             test_size=per_class_test,
             n=num_dims,
             gap=gap,
-            plot_data=True
+            plot_data=False
         )
         
         # Convert one-hot to 1D labels
@@ -275,7 +275,7 @@ class SyntheticDataManager():
         # Dictionary of tuples (X, y)
         self.datasets_dict = {}
         
-    def create_dataset(self, label, num_dims, n_samples=500, n_informative=4, 
+    def create_dataset(self, label, num_dims, n_samples, n_informative=4, 
                       n_classes=2, n_clusters_per_class=1, flip_y=0.01, 
                       class_sep=1.0, random_state=42):
         """
@@ -324,13 +324,13 @@ class SyntheticDataManager():
         
         return X, y
     
-    def create_variance_dataset(self, label, n_features, inter_distance=2.0, intra_spread=1.0, n_samples=500, random_state=42):
+    def create_variance_dataset(self, label, n_features, centroids_distance=2.0, cluster_spread=1.0, n_samples=500, random_state=42):
         """
         Generates a synthetic dataset to test the intra/inter variance hypothesis.
         
         Args:
-            inter_distance (float): Controls Inter-class Variance (distance between centroids).
-            intra_spread (float): Controls Intra-class Variance (standard deviation within classes).
+            centroids_distance (float): Controls distance between centroids (Inter-class Variance).
+            cluster_spread (float): Controls spread of each cluster (Intra-class Variance).
             n_samples (int): Total number of data points.
             n_features (int): Dimensionality of the data.
         """
@@ -340,7 +340,7 @@ class SyntheticDataManager():
         # Define the centroids based on the inter_distance
         # We place Class 0 at (-distance/2, -distance/2) 
         # and Class 1 at (distance/2, distance/2)
-        offset = inter_distance / 2.0
+        offset = centroids_distance / 2.0
         centers = [
             np.full(n_features, -offset), 
             np.full(n_features, offset)
@@ -350,9 +350,9 @@ class SyntheticDataManager():
         # cluster_std maps perfectly to your Intra-class Variance
         X, y = datasets.make_blobs(
             n_samples=n_samples,
-            n_features=2,
+            n_features=n_features,
             centers=centers,
-            cluster_std=intra_spread, # This isolates the intra-variance
+            cluster_std=cluster_spread,
             random_state=random_state
         )
         
@@ -386,8 +386,8 @@ class SyntheticDataManager():
             'noise': ('flip_y', 'classification'),
             
             # Custom variance/entanglement modes
-            'inter_distance': ('inter_distance', 'variance'),
-            'intra_spread': ('intra_spread', 'variance')
+            'centroids_distance': ('centroids_distance', 'variance'),
+            'cluster_spread': ('cluster_spread', 'variance')
         }
         
         if mode not in mode_config:
@@ -414,12 +414,10 @@ class SyntheticDataManager():
             # Route execution to the correct generation function
             if target_generator == 'classification':
                 params['num_dims'] = num_dims
-                params['n_classes'] = n_classes  # Add class count for sklearn
+                params['n_classes'] = n_classes
                 self.create_dataset(**params)
                 
             elif target_generator == 'variance':
-                # Our custom variance generator is inherently built for binary 
-                # classification (2 centroids), so n_classes is implicitly handled.
                 params['n_features'] = num_dims
                 self.create_variance_dataset(**params)
         
