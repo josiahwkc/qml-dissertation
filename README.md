@@ -3,6 +3,8 @@
 **Author:** Josiah Chan (K23091949)  
 **Institution:** King's College London  
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19651062.svg)](https://doi.org/10.5281/zenodo.19651062)
+
 ## Overview
 This repository contains the complete experimental framework for evaluating a **Quantum Support Vector Machine (QSVC)** against a **Classical SVM (RBF Kernel)** under controlled and realistic conditions.
 
@@ -15,7 +17,29 @@ The study adopts a systematic approach consisting of:
 
 The framework is designed to isolate the effect of **feature representation**, ensuring a fair comparison between classical and quantum models within the same SVM optimisation pipeline.
 
-The project utilises **Qiskit Machine Learning** primitives (`FidelityQuantumKernel`) and is configured to run on local simulators using Qiskit Aer's sampling backends, reflecting constraints of near-term quantum computing.
+---
+
+## Data Acquisition
+The experimental results, raw trial logs, and benchmark datasets required for full reproduction are hosted on Zenodo. 
+
+1. **Download the Dataset:** Obtain the `datasets.zip` file from:  
+   https://doi.org/10.5281/zenodo.19651062
+2. **Extraction:** Unzip the contents into the root directory of this project.
+3. **Directory Verification:** Your local environment should be structured as follows for the scripts to resolve paths correctly:
+
+```text
+.
+├── src/                # Python source files
+│   ├── main.py
+│   ├── experiment.py
+│   └── ... 
+├── datasets/               # <--- EXTRACTED FROM ZENODO
+│   ├── mnist_train.csv     # Original benchmark datasets
+│   └── ...        
+├── requirements.txt
+└── README.md
+```
+---
 
 ## Architecture and File Structure
 
@@ -30,7 +54,29 @@ The project utilises **Qiskit Machine Learning** primitives (`FidelityQuantumKer
 
 ## Installation
 
-This project requires a Python environment (3.9+ recommended) with Qiskit, Scikit-Learn, and their respective dependencies.
+### Prerequisites
+- Python 3.12
+- Access to a terminal/command prompt
 
+### Setup
+1. **Clone the repository:**
 ```bash
+git clone https://github.com/josiahwkc/qml-dissertation.git
+cd qml-dissertation
+```
+2. **Install dependencies:**
+It is recommended to use a virtual environment to manage Qiskit versions:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+---
+
+## Usage
+To execute the experimental framework, run:
+```bash
+python src/main.py
+```
+Upon execution, follow the terminal prompts to select an experiment mode. The system will retrieve configurations from the `ExperimentConfig` class and execute the selected benchmark, saving all outputs to the `./results` directory
