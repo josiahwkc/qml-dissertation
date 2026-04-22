@@ -34,28 +34,83 @@ class TrainingSampler():
     """Samples training subsets with optional class imbalance"""
         
     @staticmethod
-    def create_class_imbalance(X_pool, y_pool, train_size, seed, imbalance_ratio=0.5):
+    def create_class_imbalance(X_pool, y_pool, train_size, seed, class0_fraction=0.5):
+        
+        # Validate train_size
+        if not isinstance(train_size, (int, np.integer)):
+            raise TypeError(f"train_size must be integer, got {type(train_size)}")
+        if train_size <= 0:
+            raise ValueError(f"train_size must be positive, got {train_size}")
+        if train_size > len(X_pool):
+            raise ValueError(
+                f"train_size ({train_size}) exceeds pool size ({len(X_pool)})"
+            )
+        
+        # Validate class0_fraction
+        if not isinstance(class0_fraction, (int, float, np.number)):
+            raise TypeError(
+                f"class0_fraction must be numeric, got {type(class0_fraction)}"
+            )
+        if not 0.0 <= class0_fraction <= 1.0:
+            raise ValueError(
+                f"class0_fraction must be in [0, 1], got {class0_fraction}"
+            )
+        
+        # Validate binary classification
+        unique_classes = np.unique(y_pool)
+        if not np.array_equal(unique_classes, [0, 1]):
+            raise ValueError(
+                f"y_pool must contain exactly classes {{0, 1}}, got {unique_classes}"
+            )
+        
         rng = np.random.default_rng(seed)
         
         # Separate dataset by class
         X_pool_class0 = X_pool[y_pool == 0]
         X_pool_class1 = X_pool[y_pool == 1]
         
-        # calculate number of samples needed
-        n_class0 = int(train_size * imbalance_ratio)
+        
+        n_class0 = round(train_size * class0_fraction)
         n_class1 = train_size - n_class0
         
+        # Validate sufficient samples available
+        if n_class0 > len(X_pool_class0):
+            raise RuntimeError(
+                f"Insufficient class 0 samples: need {n_class0}, "
+                f"have {len(X_pool_class0)}"
+            )
+        if n_class1 > len(X_pool_class1):
+            raise RuntimeError(
+                f"Insufficient class 1 samples: need {n_class1}, "
+                f"have {len(X_pool_class1)}"
+            )
+        
         # sample without replacement
-        idx0 = rng.choice(len(X_pool_class0), size=min(n_class0, len(X_pool_class0)), replace=False)
-        idx1 = rng.choice(len(X_pool_class1), size=min(n_class1, len(X_pool_class1)), replace=False)
+        idx0 = rng.choice(len(X_pool_class0), size=n_class0, replace=False)
+        idx1 = rng.choice(len(X_pool_class1), size=n_class1, replace=False)
         
+        # Combine samples from both classes
         X_train = np.vstack([X_pool_class0[idx0], X_pool_class1[idx1]])
-        y_train = np.array([0] * len(idx0) + [1] * len(idx1))
+        y_train = np.array([0] * n_class0 + [1] * n_class1)
         
-        # Shuffle
+        
+        # Shuffle to randomize class order
         shuffle_idx = rng.permutation(len(y_train))
         X_train = X_train[shuffle_idx]
         y_train = y_train[shuffle_idx]
+        
+        # ============================================================================
+        # SANITY CHECK
+        # ============================================================================
+        
+        assert len(X_train) == train_size, \
+            f"Internal error: got {len(X_train)} samples, expected {train_size}"
+        assert len(X_train) == len(y_train), \
+            "Internal error: X and y length mismatch"
+        assert np.sum(y_train == 0) == n_class0, \
+            "Internal error: class 0 count mismatch"
+        assert np.sum(y_train == 1) == n_class1, \
+            "Internal error: class 1 count mismatch"
         
         return X_train, y_train
 
@@ -278,7 +333,7 @@ class SyntheticDataManager():
         # Stores generated datasets keyed by their unique experiment label
         self.datasets_dict = {}
         
-    def create_dataset(self, label, num_dims, n_samples, n_informative=4, 
+    def create_dataset(self, label, num_dims, n_samples, weights=None, n_informative=4, 
                       n_classes=2, n_clusters_per_class=1, flip_y=0.01, 
                       class_sep=1.0, random_state=42):
         """Generates datasets using sklearn's make_classification."""
@@ -296,6 +351,7 @@ class SyntheticDataManager():
         X, y = datasets.make_classification(
             n_samples=n_samples,
             n_features=num_dims,
+            weights=weights,
             n_informative=n_informative,
             n_redundant=0,
             n_repeated=0,
@@ -359,7 +415,8 @@ class SyntheticDataManager():
             'clusters': ('n_clusters_per_class', 'classification'),
             'noise': ('flip_y', 'classification'),
             'centroids_distance': ('centroids_distance', 'variance'),
-            'cluster_spread': ('cluster_spread', 'variance')
+            'cluster_spread': ('cluster_spread', 'variance'),
+            'weights': ('weights', 'classification'),
         }
         
         if mode not in mode_config:
