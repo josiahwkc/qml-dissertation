@@ -25,6 +25,7 @@ CSV_MODES = [
 ]
 
 SYNTHETIC_MODES = [
+    'weights',
     'feature_complexity', 
     'margin', 
     'clusters', 
@@ -71,10 +72,12 @@ def main():
         
         print("\nWhich variable do you want to experiment on?")
         experiment_mode = get_user_choice(CSV_MODES)
+        print()
         
     elif data_type == "Synthetic Data":
         print("\nWhich variable do you want to experiment on?")
         experiment_mode = get_user_choice(SYNTHETIC_MODES)
+        print()
     else:
         experiment_mode = "quantum_benchmark"
         
