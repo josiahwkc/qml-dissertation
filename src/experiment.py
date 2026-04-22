@@ -55,7 +55,7 @@ class ExperimentConfig:
             'description': 'Vary training set size on real data'
         },
         'imbalance': {
-            'x_label': 'Class Imbalance Ratio',
+            'x_label': 'Class Imbalance (Majority Class %)',
             'title_suffix': 'vs Class Imbalance',
             'value_name': 'Ratio',
             'data_source': DATA_SOURCE_CSV,
@@ -78,6 +78,17 @@ class ExperimentConfig:
             'sweep_parameter': 'n_informative',
             'num_dims': NUM_DIMS,
             'description': 'Vary number of informative features in synthetic data'
+        },
+        'weights': {
+            'x_label': 'Class Imbalance (Majority Class %)',
+            'title_suffix': 'vs Class Imbalance',
+            'value_name': 'Imbalance Weights',
+            'data_source': DATA_SOURCE_SKLEARN,
+            'requires_file': False,
+            'sweep_values': [[0.5, 0.5], [0.6, 0.4], [0.7, 0.3], [0.8, 0.2], [0.9, 0.1]],
+            'sweep_parameter': 'weights',
+            'num_dims': NUM_DIMS,
+            'description': 'Vary the class imbalance ratio in synthetic data'
         },
         'margin': {
             'x_label': 'Class Separation',
@@ -547,7 +558,7 @@ class ExperimentRunner():
                 y_pool=y_pool,
                 train_size=train_size,
                 seed=trial,
-                imbalance_ratio=imbalance
+                class0_fraction=imbalance
             )
             
             yield trial, (X_train, X_val, X_test, y_train, y_val, y_test)
@@ -773,7 +784,14 @@ class ExperimentRunner():
     
     def _store_results(self, value, stats):
         """Store results for plotting and CSV export"""
-        self.results['x_values'].append(value)
+        if isinstance(value, list):
+            # Extract the majority class percentage (the first item)
+            plot_x = value[0] 
+            # Alternatively, use a string: plot_x = str(value)
+        else:
+            plot_x = value
+            
+        self.results['x_values'].append(plot_x)
         
         # Classical
         self.results['c_acc'].append(stats['c_avg_acc'])
