@@ -3,7 +3,7 @@
 **Author:** Josiah Chan (K23091949)  
 **Institution:** King's College London  
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19651062.svg)](https://doi.org/10.5281/zenodo.19651062)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19698173.svg)](https://doi.org/10.5281/zenodo.19698173)
 
 ## Overview
 This repository contains the complete experimental framework for evaluating a **Quantum Support Vector Machine (QSVC)** against a **Classical SVM (RBF Kernel)** under controlled and realistic conditions.
